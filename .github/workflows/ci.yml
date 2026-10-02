@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing is cached on purpose: a warm cache can hide a broken build, and the
+# suite is fast enough (a few seconds per job) that caching buys nothing.
+jobs:
+  suite:
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # PHP is installed with the runner's own package manager instead of a
+      # third-party action (shivammathur/setup-php): the runner images already
+      # carry php, and apt/choco keeps the trust boundary inside the image
+      # instead of adding another action to audit.
+      - name: Install PHP (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          # php-cli does not depend on mbstring: without the explicit package
+          # PHP passes the version check below and then fatals in Util::clip on
+          # the first request, which reads as an opaque parity failure.
+          sudo apt-get install -y --no-install-recommends php-cli php-mbstring
+          php --version
+          php -r 'exit(PHP_VERSION_ID >= 80100 ? 0 : 1);'
+          php -r 'exit(function_exists("mb_strlen") ? 0 : 1);' || { echo "::error::PHP has no mbstring; the suite cannot run"; exit 1; }
+          echo "mbstring ok"
+          # The image ships Xdebug enabled for the CLI. Its error handler and
+          # startup cost are not what any user runs, and parity.mjs diffs PHP
+          # output byte for byte, so switch it off for the rest of the job.
+          echo "XDEBUG_MODE=off" >> "$GITHUB_ENV"
+
+      - name: Install PHP (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command php -ErrorAction SilentlyContinue)) {
+            choco install php --no-progress -y --limit-output
+            $env:Path = "C:\tools\php;$env:Path"
+            "C:\tools\php" | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+          if (-not (Get-Command php -ErrorAction SilentlyContinue)) { throw 'php is not available' }
+          php --version
+          if ([int](php -r 'echo PHP_VERSION_ID;') -lt 80100) { throw 'PHP >= 8.1 required' }
+          php -r 'exit(function_exists("mb_strlen") ? 0 : 1);'
+          if ($LASTEXITCODE -ne 0) { throw 'PHP has no mbstring; the suite cannot run' }
+          Write-Output 'mbstring ok'
+
+      # A PHP syntax error has to name itself instead of surfacing two steps
+      # later as an opaque parity diff. shell: bash works on the Windows runner
+      # too (Git Bash ships in the image), so one step covers both OSes.
+      - name: Lint PHP
+        shell: bash
+        run: |
+          status=0
+          for f in skills/opencode-workspace/runtime/lib/php/*.php skills/opencode-workspace/runtime/public/index.php; do
+            php -l "$f" || status=1
+          done
+          exit $status
+
+      # Same reason as in parity.mjs: the servers must resolve the registry
+      # inside a throwaway dir, never in the runner's real home cache.
+      - name: Hermetic cache dir (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdg-cache"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/xdg-cache" >> "$GITHUB_ENV"
+
+      - name: Hermetic cache dir (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'xdg-cache') | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "XDG_CACHE_HOME=$(Join-Path $env:RUNNER_TEMP 'xdg-cache')"
+
+      - name: Run suite
+        run: node skills/opencode-workspace/runtime/bin/test.mjs --php-port=8803 --node-port=8804 --check-port=8805
+
+      # Regression guard for the bug this suite was made hermetic to fix.
+      - name: Real registry untouched (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          f="$HOME/.cache/opencode-workspace/registry.json"
+          if [ -f "$f" ]; then echo "::error::the suite wrote the real registry"; cat "$f"; exit 1; fi
+          echo "ok: $f absent"
+
+      - name: Real registry untouched (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:USERPROFILE '.cache\opencode-workspace\registry.json'
+          if (Test-Path $f) { Write-Output '::error::the suite wrote the real registry'; Get-Content $f; exit 1 }
+          Write-Output "ok: $f absent"

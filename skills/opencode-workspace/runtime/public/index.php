@@ -24,6 +24,58 @@ $send = static function (int $status, array $headers, string $body = ''): never 
 };
 $text = ['Content-Type' => 'text/plain; charset=utf-8'];
 
+// Access token, same contract as bin/serve-node.mjs. Set with WORKSPACE_TOKEN,
+// or let workspace.sh generate one for a non-loopback --bind. It is only demanded
+// from non-loopback peers, so 127.0.0.1 stays open on the machine that opted in.
+// No token = no check at all.
+function workspace_clean_token(?string $v): string
+{
+    $t = $v === null ? '' : trim($v);
+    return preg_match('/^[0-9A-Za-z_-]{16,128}$/D', $t) === 1 ? $t : '';
+}
+// null = no token configured.
+function workspace_active_token(?string $storage): ?string
+{
+    $e = workspace_clean_token((string) getenv('WORKSPACE_TOKEN'));
+    return $e === '' ? null : $e;
+}
+function workspace_loopback_bind(string $b): bool
+{
+    return $b === '127.0.0.1' || $b === 'localhost' || $b === '::1' || $b === '::ffff:127.0.0.1' || str_starts_with($b, '127.');
+}
+function workspace_loopback_peer(?string $addr): bool
+{
+    $a = strtolower((string) $addr);
+    if (str_starts_with($a, '::ffff:')) {
+        $a = substr($a, 7);
+    }
+    return $a === '::1' || preg_match('/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/', $a) === 1;
+}
+function workspace_cookie_token(): string
+{
+    $raw = (string) ($_SERVER['HTTP_COOKIE'] ?? '');
+    if ($raw === '' || strlen($raw) > 4096) {
+        return '';
+    }
+    foreach (explode(';', $raw) as $part) {
+        $i = strpos($part, '=');
+        if ($i === false || trim(substr($part, 0, $i)) !== 'workspace_token') {
+            continue;
+        }
+        return rawurldecode(trim(substr($part, $i + 1)));
+    }
+    return '';
+}
+function workspace_project_base(string $p): string
+{
+    $parts = preg_split('#[/\\\\]+#', rtrim($p, '/\\'));
+    if (!is_array($parts)) {
+        return '';
+    }
+    $parts = array_values(array_filter($parts, static fn(string $x): bool => $x !== ''));
+    return $parts === [] ? '' : mb_substr((string) end($parts), 0, 256);
+}
+
 function workspace_registry_file(): ?string
 {
     $base = getenv('XDG_CACHE_HOME');
@@ -168,6 +220,19 @@ function workspace_badge_svg(?array $state, string $rawLabel): string
 if ($project === false) {
     $send(500, $text, 'Project folder not found');
 }
+$bind = trim((string) getenv('WORKSPACE_BIND'));
+if ($bind === '') {
+    $bind = '127.0.0.1';
+}
+$wsToken = workspace_active_token($storage);
+if (!workspace_loopback_bind($bind)) {
+    if (trim((string) getenv('WORKSPACE_ALLOW_LAN')) !== '1') {
+        $send(500, $text, 'Refusing to bind ' . $bind . ': every host that can reach this address would read this project agent activity with no login. Re-run with WORKSPACE_ALLOW_LAN=1 to accept that, or bind 127.0.0.1.');
+    }
+    if ($wsToken === null) {
+        $send(500, $text, 'Refusing to bind ' . $bind . ': WORKSPACE_ALLOW_LAN=1 also needs an access token. Set WORKSPACE_TOKEN to 16-128 characters of A-Z a-z 0-9 _ -.');
+    }
+}
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method !== 'GET' && $method !== 'HEAD') {
     $send(405, $text + ['Allow' => 'GET, HEAD'], 'Method not allowed');
@@ -176,12 +241,31 @@ if (!WHttp::hostAllowed(isset($_SERVER['HTTP_HOST']) ? (string) $_SERVER['HTTP_H
     $send(421, $text, 'Unknown host');
 }
 $path = rtrim((string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH), '/');
+$cookieHeader = [];
+if ($wsToken !== null && str_starts_with($path, '/workspace')) {
+    $q = isset($_GET['k']) && is_string($_GET['k']) ? $_GET['k'] : null;
+    if ($q !== null && hash_equals($wsToken, $q)) {
+        // first visit with the link: hand the token to the browser so a reload,
+        // a bookmark and the project switcher keep working without ?k=
+        $cookie = 'workspace_token=' . rawurlencode($wsToken) . '; Path=/workspace; HttpOnly; SameSite=Lax';
+        $cookieHeader = ['Set-Cookie' => $cookie];
+    } else {
+        // hash_equals is constant-time and length-safe, so a short or long k= ends in 403.
+        // loopback peers are the machine that opted in, so they keep the plain local URL.
+        $local = workspace_loopback_peer(isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : null);
+        if ($local || hash_equals($wsToken, (string) $q) || hash_equals($wsToken, workspace_cookie_token())) {
+            $cookieHeader = [];
+        } else {
+            $send(403, $text + ['Cache-Control' => 'no-store'], 'Workspace token required');
+        }
+    }
+}
 
 if ($path === '' || $path === '/index.php') {
-    $send(302, ['Location' => '/workspace']);
+    $send(302, $cookieHeader + ['Location' => '/workspace']);
 }
 if ($path === '/workspace/api/ping') {
-    $send(200, ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
+    $send(200, $cookieHeader + ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
         (string) json_encode(['app' => 'opencode-workspace', 'project' => substr(md5($project), 0, 12), 'runtime' => 'php']));
 }
 $cfg = WConfig::load($runtime, $project);
@@ -192,7 +276,7 @@ if ($path === '/workspace') {
     }
     $page = (string) file_get_contents($runtime . '/views/page.html');
     $json = json_encode(WHttp::pageConfig($cfg), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
-    $send(200, ['Content-Type' => 'text/html; charset=utf-8', 'Cache-Control' => 'no-cache'], strtr($page, [
+    $send(200, $cookieHeader + ['Content-Type' => 'text/html; charset=utf-8', 'Cache-Control' => 'no-cache'], strtr($page, [
         '{{TITLE}}' => htmlspecialchars($cfg['title'], ENT_QUOTES),
         '{{CONFIG_SCRIPT}}' => '<script>window.WORKSPACE = ' . $json . ';</script>',
     ]));
@@ -203,7 +287,7 @@ if ($path === '/workspace/api/state') {
         workspace_registry_touch($project, $kport, (string) ($cfg['title'] ?? ''), 60);
     }
     $state = WOffice::build($project, $storage, $cfg, (int) floor(microtime(true) * 1000));
-    $send(200, ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
+    $send(200, $cookieHeader + ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
         (string) json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
 }
 if ($path === '/workspace/api/projects') {
@@ -211,6 +295,7 @@ if ($path === '/workspace/api/projects') {
     if ($kport >= 1 && $kport <= 65535) {
         workspace_registry_touch($project, $kport, (string) ($cfg['title'] ?? ''));
     }
+    $exposePaths = trim((string) getenv('WORKSPACE_EXPOSE_PATHS')) === '1';
     $reg = workspace_registry_read();
     $nowMs = (int) floor(microtime(true) * 1000);
     $items = [];
@@ -220,7 +305,17 @@ if ($path === '/workspace/api/projects') {
         if ($stale) {
             continue;
         }
-        $items[] = $e + ['stale' => false, 'current' => ((int) $e['port'] === $kport)];
+        // absolute folder path only with WORKSPACE_EXPOSE_PATHS=1; the switcher
+        // labels a project from `project` either way (basename === its own base())
+        $items[] = [
+            'project' => $exposePaths ? (string) $e['project'] : workspace_project_base((string) $e['project']),
+            'port' => (int) $e['port'],
+            'title' => (string) $e['title'],
+            'updated' => (string) $e['updated'],
+            'id' => substr(md5((string) $e['project']), 0, 12),
+            'stale' => false,
+            'current' => ((int) $e['port'] === $kport),
+        ];
     }
     usort($items, static function (array $a, array $b): int {
         if ((bool) ($a['current'] ?? false) !== (bool) ($b['current'] ?? false)) {
@@ -238,7 +333,7 @@ if ($path === '/workspace/api/projects') {
         $seen[$p] = true;
         $uniq[] = $e;
     }
-    $send(200, ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
+    $send(200, $cookieHeader + ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
         (string) json_encode(['app' => 'opencode-workspace', 'projects' => $uniq], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
 }
 if ($path === '/workspace/badge.svg') {
@@ -249,25 +344,25 @@ if ($path === '/workspace/badge.svg') {
     } catch (Throwable $e) {
         $svg = workspace_badge_svg(null, $labelQ);
     }
-    $send(200, ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'public, max-age=10'], $svg);
+    $send(200, $cookieHeader + ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'public, max-age=10'], $svg);
 }
 if (str_starts_with($path, '/workspace/assets/')) {
     $rel = rawurldecode(substr($path, strlen('/workspace/assets/')));
     $base = realpath(__DIR__ . '/assets');
     $f = str_contains($rel, "\0") ? false : realpath(__DIR__ . '/assets/' . $rel);
     if ($base === false || $f === false || !str_starts_with($f, $base . DIRECTORY_SEPARATOR) || !is_file($f)) {
-        $send(404, []);
+        $send(404, $cookieHeader);
     }
     $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
     $ctype = $ext === 'js' ? 'text/javascript; charset=utf-8' : ($ext === 'woff2' ? 'font/woff2' : ($ext === 'png' ? 'image/png' : null));
     if ($ctype === null) {
-        $send(404, []);
+        $send(404, $cookieHeader);
     }
     $etag = '"' . dechex((int) filemtime($f)) . '-' . dechex((int) filesize($f)) . '"';
     $h = ['Content-Type' => $ctype, 'Cache-Control' => 'public, max-age=3600', 'ETag' => $etag];
     if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
-        $send(304, $h);
+        $send(304, $cookieHeader + $h);
     }
-    $send(200, $h + ['Content-Length' => (string) filesize($f)], (string) file_get_contents($f));
+    $send(200, $cookieHeader + $h + ['Content-Length' => (string) filesize($f)], (string) file_get_contents($f));
 }
-$send(404, $text, 'Not found');
+$send(404, $cookieHeader + $text, 'Not found');

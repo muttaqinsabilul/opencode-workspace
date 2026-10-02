@@ -12,6 +12,17 @@ final class WSource
     private const SESS_CAP = 200;
     private const MSG_LIMIT = 200;
 
+    // Cache schema version. Bumped to 2 when delegation records started carrying a child session
+    // id: a `v: 1` cache holds records whose `child` is always null, and an inactive session is
+    // never re-summarised, so those wrong records would otherwise persist for the whole window.
+    private const CACHE_V = 2;
+
+    // A rendered subagent tool text carries the child session id in one of two shapes: the quoted
+    // `<subagent sessionID="ses_...">` completion envelope, and the unquoted
+    // `... (sessionID: ses_...)` background notice. The structured `state.metadata.sessionID`
+    // field is preferred, this regex is only the fallback for builds that do not send it.
+    private const SES_IN_TEXT = '/sessionID(?:=|:\s*)(ses_[A-Za-z0-9]+)/';
+
     private static function num(mixed $v): int|float
     {
         return (is_int($v) || is_float($v)) && is_finite((float) $v) ? $v : 0;
@@ -55,7 +66,7 @@ final class WSource
             return null;
         }
         $v = json_decode($raw, true);
-        return (is_array($v) && ($v['v'] ?? null) === 1) ? $v : null;
+        return (is_array($v) && ($v['v'] ?? null) === self::CACHE_V) ? $v : null;
     }
 
     private static function writeCache(?string $f, array $v): void
@@ -63,13 +74,48 @@ final class WSource
         if ($f === null) {
             return;
         }
-        @mkdir(dirname($f), 0777, true);
+        // The per-session cache holds task text, tool inputs and relative paths, so it is kept
+        // owner-only: 0700 for a directory this call creates, 0600 for the file. `mkdir` only
+        // applies the mode to directories it creates itself, so an existing shared parent such as
+        // `~/.cache` is never re-permissioned; the explicit chmod covers a file an older release
+        // created with a looser mode. Both modes are POSIX-only and Windows largely ignores them.
+        @mkdir(dirname($f), 0700, true);
         @file_put_contents($f, json_encode($v), LOCK_EX);
+        @chmod($f, 0600);
+    }
+
+    // Child session id recorded by a subagent tool call, or null. The structured field wins; the
+    // rendered text is only consulted when it is absent, and the summarizing session's own id is
+    // never accepted, because a subagent report may quote the parent's session id back.
+    private static function childIdOf(mixed $state, string $selfId): ?string
+    {
+        if (!self::isObj($state)) {
+            return null;
+        }
+        if (self::isObj($state['metadata'] ?? null) && isset($state['metadata']['sessionID'])
+            && is_string($state['metadata']['sessionID']) && str_starts_with($state['metadata']['sessionID'], 'ses_')) {
+            return $state['metadata']['sessionID'] === $selfId ? null : $state['metadata']['sessionID'];
+        }
+        if (isset($state['content']) && is_array($state['content'])) {
+            foreach ($state['content'] as $c) {
+                if (self::isObj($c) && isset($c['text']) && is_string($c['text'])
+                    && preg_match(self::SES_IN_TEXT, $c['text'], $mm)) {
+                    return $mm[1] === $selfId ? null : $mm[1];
+                }
+            }
+        }
+        return null;
     }
 
     private static function summarize(string $id, array $session, array $messages, bool $isActive, string $projectDir): array
     {
         $time = (isset($session['time']) && self::isObj($session['time'])) ? $session['time'] : [];
+        // `agent` and `title` are LLM-written summaries of the user's own prompt, which makes them
+        // the most likely place for a pasted credential, so both are redacted on the way into the
+        // summary. `agentType` falls back to 'build' exactly as before when it is missing or
+        // empties out.
+        $rawAgent = (isset($session['agent']) && is_string($session['agent']) && $session['agent'] !== '') ? $session['agent'] : 'build';
+        $agentType = WUtil::redact($rawAgent);
         $s = [
             'started' => WUtil::isoMs((int) self::num($time['created'] ?? 0)),
             'updated' => WUtil::isoMs((int) self::num($time['updated'] ?? 0)),
@@ -84,8 +130,8 @@ final class WSource
             'todoSource' => null,
             'segs' => [],
             'stops' => [],
-            'agentType' => (isset($session['agent']) && is_string($session['agent']) && $session['agent'] !== '') ? $session['agent'] : 'build',
-            'title' => (isset($session['title']) && is_string($session['title'])) ? $session['title'] : '',
+            'agentType' => $agentType !== '' ? $agentType : 'build',
+            'title' => (isset($session['title']) && is_string($session['title'])) ? WUtil::redact($session['title']) : '',
         ];
         $delegations = [];
         $push = static function (string $t, string $kind, string $text, mixed $tool) use (&$s): void {
@@ -110,6 +156,26 @@ final class WSource
                 if (isset($m['text']) && is_string($m['text']) && trim($m['text']) !== '') {
                     $push($t, 'user', 'User instruction', null);
                     $s['lastKind'] = 'user';
+                }
+                continue;
+            }
+            // A finished subagent is recorded as a `synthetic` message carrying
+            // `metadata.source = 'subagent'`, `metadata.childID` and a top-level `description`.
+            // These are collected as delegation records too, because the 200-message window keeps
+            // the LATEST messages: a long running subagent pushes its originating tool part out
+            // of the window while the completion record stays. Field names and the description are
+            // normalised to match the tool-part record exactly, so the two sources are
+            // interchangeable.
+            if (($m['type'] ?? null) === 'synthetic') {
+                $md = isset($m['metadata']) && self::isObj($m['metadata']) ? $m['metadata'] : null;
+                if ($md !== null && ($md['source'] ?? null) === 'subagent'
+                    && isset($md['childID']) && is_string($md['childID']) && str_starts_with($md['childID'], 'ses_')) {
+                    $delegations[] = [
+                        'agent' => (isset($md['agent']) && is_string($md['agent'])) ? $md['agent'] : '',
+                        'description' => (isset($m['description']) && is_string($m['description'])) ? WUtil::safeLine($m['description'], 140) : '',
+                        'created' => (isset($m['time']) && self::isObj($m['time']) && isset($m['time']['created']) && (is_int($m['time']['created']) || is_float($m['time']['created']))) ? $m['time']['created'] : 0,
+                        'child' => $md['childID'] === $id ? null : $md['childID'],
+                    ];
                 }
                 continue;
             }
@@ -153,8 +219,11 @@ final class WSource
                     $t = isset($pt['created']) && (is_int($pt['created']) || is_float($pt['created'])) ? WUtil::isoMs((int) $pt['created']) : '';
                     $nm = isset($p['name']) && is_string($p['name']) ? $p['name'] : '';
                     [$text, $file] = WUtil::describeTool($nm, $inp, $projectDir);
+                    // `describeTool` already redacts the path; redaction here is idempotent and
+                    // keeps the invariant local: nothing reaches `s.files` without passing through
+                    // `WUtil::redact`.
                     if ($file !== null && !in_array($file, $s['files'], true)) {
-                        $s['files'][] = $file;
+                        $s['files'][] = WUtil::redact($file);
                         if (count($s['files']) > self::FILES_KEEP) {
                             $s['files'] = array_slice($s['files'], count($s['files']) - self::FILES_KEEP);
                         }
@@ -164,17 +233,8 @@ final class WSource
                             'agent' => (isset($inp['agent']) && is_string($inp['agent'])) ? $inp['agent'] : '',
                             'description' => (isset($inp['description']) && is_string($inp['description'])) ? WUtil::safeLine($inp['description'], 140) : '',
                             'created' => (isset($pt['created']) && (is_int($pt['created']) || is_float($pt['created']))) ? $pt['created'] : 0,
-                            'child' => null,
+                            'child' => self::childIdOf($p['state'] ?? null, $id),
                         ];
-                        if (isset($p['state']) && self::isObj($p['state']) && isset($p['state']['content']) && is_array($p['state']['content'])) {
-                            foreach ($p['state']['content'] as $c) {
-                                if (self::isObj($c) && isset($c['text']) && is_string($c['text'])
-                                    && preg_match('/sessionID="(ses_[A-Za-z0-9]+)"/', $c['text'], $mm)) {
-                                    $dg['child'] = $mm[1];
-                                    break;
-                                }
-                            }
-                        }
                         $delegations[] = $dg;
                     }
                     $push($t, 'tool', $text, $nm);
@@ -284,7 +344,10 @@ final class WSource
         // so ranking by it picks the wrong one and silently hides every session of the newest row.
         // union the sessions of all matching rows instead, deduped by session id.
         $matches = [];
-        foreach (is_array($projects) ? $projects : [] as $x) {
+        // /api/project returns a bare array today; accept a {data:…} envelope too so a future
+        // change of shape shows up as an empty dashboard rather than a silent one.
+        $rows = is_array($projects) ? $projects : (self::isObj($projects) ? array_values($projects) : []);
+        foreach ($rows as $x) {
             if (self::isObj($x) && WOClient::normDir((string) ($x['canonical'] ?? '')) === $want) {
                 $matches[] = $x;
             }
@@ -334,8 +397,21 @@ final class WSource
         $roots = array_values(array_filter($inWin, static fn($x) => empty($x['parentID'])));
         usort($roots, static fn($a, $b) => self::num($b['time']['updated'] ?? 0) <=> self::num($a['time']['updated'] ?? 0));
         $roots = array_slice($roots, 0, (int) $cfg['mains_max']);
-        $kids = array_values(array_filter($inWin, static fn($x) => !empty($x['parentID'])));
-        usort($kids, static fn($a, $b) => self::num($b['time']['created'] ?? 0) <=> self::num($a['time']['created'] ?? 0));
+        // `usort` is not stable in PHP while `Array.prototype.sort` is in JS, so equal creation times are
+        // broken on the original position here too. The delegation fallback below walks `$kids` in
+        // order, so an unstable sort would let the two runtimes hand two children different
+        // delegations.
+        $kidsDec = [];
+        foreach ($inWin as $i => $x) {
+            if (!empty($x['parentID'])) {
+                $kidsDec[] = [$i, $x];
+            }
+        }
+        usort($kidsDec, static function ($a, $b): int {
+            $c = self::num($b[1]['time']['created'] ?? 0) <=> self::num($a[1]['time']['created'] ?? 0);
+            return $c !== 0 ? $c : ($a[0] <=> $b[0]);
+        });
+        $kids = array_map(static fn($e) => $e[1], $kidsDec);
         $kids = array_slice($kids, 0, self::SESS_CAP);
         $scope = [...$roots, ...$kids];
         $scopeIds = [];
@@ -376,20 +452,30 @@ final class WSource
             }
             $v = self::summarize((string) $x['id'], $x, $messages, isset($running[$x['id']]), $projectDir);
             self::buildSegs($v['s'], (int) $cfg['cooldown'] * 1000);
-            self::writeCache($cf, ['v' => 1, 'updated' => $upd, 'scopeOk' => true, 's' => $v['s'], 'delegations' => $v['delegations']]);
+            self::writeCache($cf, ['v' => self::CACHE_V, 'updated' => $upd, 'scopeOk' => true, 's' => $v['s'], 'delegations' => $v['delegations']]);
             $sums[$x['id']] = $v;
         }
         $delegByParent = [];
         foreach ($sums as $id => $v) {
             $delegByParent[$id] = $v['delegations'];
         }
+        // Exact child-id -> description map, plus the set of delegation records already claimed by
+        // an exact match. The claim set is what keeps the mapping 1:1: without it, several children
+        // whose session id is not recoverable all fell through to the positional heuristic below
+        // and were handed the SAME most recent delegation, which is why every running subagent
+        // rendered with the same title. A record claimed here is also removed from the positional
+        // pool below.
         $exactDesc = [];
-        foreach ($delegByParent as $dl) {
-            foreach ($dl as $d) {
+        $claimedDel = [];
+        foreach ($delegByParent as $pid => $dl) {
+            $used = [];
+            foreach ($dl as $i => $d) {
                 if (!empty($d['child']) && ($d['description'] ?? '') !== '') {
                     $exactDesc[$d['child']] = $d['description'];
+                    $used[$i] = true;
                 }
             }
+            $claimedDel[$pid] = $used;
         }
         $mains = [];
         foreach ($roots as $x) {
@@ -410,15 +496,36 @@ final class WSource
             if (isset($exactDesc[$x['id']])) {
                 $desc = $exactDesc[$x['id']];
             } else {
+                // Positional fallback for a child whose id was not recoverable. Still 1:1: `$kids`
+                // is walked in creation order and each delegation record is consumed at most once
+                // per parent, so no two children can end up with the same description. Ties break
+                // on the record's index in `delegations`, which is message order and therefore
+                // identical in both runtimes.
                 $dl = $delegByParent[$x['parentID']] ?? [];
-                $cands = array_values(array_filter($dl, static fn($d) => ($d['created'] ?? 0) <= self::num($x['time']['created'] ?? 0)));
-                $same = array_values(array_filter($cands, static fn($d) => ($d['agent'] ?? '') === ($x['agent'] ?? '')));
+                if (!isset($claimedDel[$x['parentID']])) {
+                    $claimedDel[$x['parentID']] = [];
+                }
+                $used = $claimedDel[$x['parentID']];
+                $cands = [];
+                foreach ($dl as $i => $d) {
+                    if (!isset($used[$i]) && self::num($d['created'] ?? 0) <= self::num($x['time']['created'] ?? 0)) {
+                        $cands[] = $i;
+                    }
+                }
+                $same = array_values(array_filter($cands, static fn($i) => ($dl[$i]['agent'] ?? '') === ($x['agent'] ?? '')));
                 $pool = count($same) ? $same : $cands;
-                usort($pool, static fn($a, $b) => ($b['created'] ?? 0) <=> ($a['created'] ?? 0));
+                usort($pool, static function ($a, $b) use ($dl): int {
+                    $c = self::num($dl[$b]['created'] ?? 0) <=> self::num($dl[$a]['created'] ?? 0);
+                    return $c !== 0 ? $c : ($a <=> $b);
+                });
                 $pick = $pool[0] ?? null;
-                if ($pick !== null && ($pick['description'] ?? '') !== '') {
-                    $desc = $pick['description'];
-                } elseif (($vs['title'] ?? '') !== '') {
+                if ($pick !== null) {
+                    $claimedDel[$x['parentID']][$pick] = true;
+                    if (($dl[$pick]['description'] ?? '') !== '') {
+                        $desc = $dl[$pick]['description'];
+                    }
+                }
+                if ($desc === '' && ($vs['title'] ?? '') !== '') {
                     $desc = WUtil::safeLine(WUtil::oneLine((string) ($x['title'] ?? ''), 140), 140);
                 }
             }

@@ -104,8 +104,12 @@ final class WOClient
         }
         self::$mem = ['url' => $url, 'password' => $pw];
         if ($cf !== null) {
-            @mkdir(dirname($cf), 0777, true);
-            @file_put_contents($cf, json_encode(['url' => $url, 'at' => (int) (microtime(true) * 1000)]));
+            // 0700/0600 like the Node half; the shared parent (e.g. ~/.cache) is never
+            // re-permissioned because mkdir only applies the mode to directories it creates.
+            @mkdir(dirname($cf), 0700, true);
+            if (@file_put_contents($cf, json_encode(['url' => $url, 'at' => (int) (microtime(true) * 1000)])) !== false) {
+                @chmod($cf, 0600);
+            }
         }
         return self::$mem;
     }

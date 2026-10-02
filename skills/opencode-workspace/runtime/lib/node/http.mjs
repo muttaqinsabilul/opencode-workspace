@@ -19,7 +19,7 @@ export function hostAllowed(hostHeader, extra) {
   const name = m[1];
   if (name.startsWith('[')) return true;
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;
-  if (name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.trycloudflare.com')) return true;
+  if (name === 'localhost' || name.endsWith('.localhost')) return true;
   for (const x of String(extra || '').toLowerCase().split(',')) {
     const e = x.trim();
     if (e !== '' && (name === e || (e.startsWith('.') && name.endsWith(e)))) return true;

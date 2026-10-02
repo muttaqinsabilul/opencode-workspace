@@ -360,11 +360,6 @@ final class WOffice
                 $recent[] = $r['started'];
             }
         }
-        $tunnel = $storageDir !== null ? trim((string) @file_get_contents($storageDir . '/tunnel-url.txt')) : '';
-        if (!preg_match('~^https://[A-Za-z0-9.-]+(:\d+)?/workspace$~', $tunnel)) {
-            $tunnel = '';
-        }
-
         return [
             'app' => 'opencode-workspace',
             'version' => self::VERSION,
@@ -385,7 +380,7 @@ final class WOffice
                 'sessions_active' => $activeMains,
             ],
             'spare_desks' => (int) $cfg['spare_desks'],
-            'public_url' => $tunnel !== '' ? $tunnel : null,
+            'public_url' => null,
         ];
     }
 }

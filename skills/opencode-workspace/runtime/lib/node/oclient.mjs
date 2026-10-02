@@ -67,8 +67,14 @@ export function getService(projectDir, storageDir) {
   mem = { url, password };
   if (cf) {
     try {
-      fs.mkdirSync(path.dirname(cf), { recursive: true });
-      fs.writeFileSync(cf, JSON.stringify({ url, at: Date.now() }));
+      // `oc-service.json` records where the local service listens, which feeds the trust decision,
+      // so keep it owner-only: 0700 for a directory this call creates, 0600 for the file. `mkdir`
+      // only applies the mode to directories it creates itself, so an existing shared parent such
+      // as `~/.cache` is never re-permissioned; the explicit chmod covers a file an older release
+      // created with a looser mode. Both modes are POSIX-only and Windows largely ignores them.
+      fs.mkdirSync(path.dirname(cf), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(cf, JSON.stringify({ url, at: Date.now() }), { mode: 0o600 });
+      fs.chmodSync(cf, 0o600);
     } catch {
     }
   }

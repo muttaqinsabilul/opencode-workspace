@@ -11,6 +11,15 @@ const FILES_KEEP = 12;
 const SESS_CAP = 200;
 const MSG_LIMIT = 200;
 const LIMIT_RE = /(usage limit|rate limit|limit reached|resets? (at|in))/i;
+// Cache schema version. Bumped to 2 when delegation records started carrying a child session id:
+// a `v: 1` cache holds records whose `child` is always null, and an inactive session is never
+// re-summarised, so those wrong records would otherwise persist for the whole window.
+const CACHE_V = 2;
+// A rendered subagent tool text carries the child session id in one of two shapes: the quoted
+// `<subagent sessionID="ses_…">` completion envelope, and the unquoted
+// `… (sessionID: ses_…)` background notice. The structured `state.metadata.sessionID` field is
+// preferred, this regex is only the fallback for builds that do not send it.
+const SES_IN_TEXT = /sessionID(?:=|:\s*)(ses_[A-Za-z0-9]+)/;
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
@@ -28,7 +37,7 @@ function readCache(f) {
   if (!f) return null;
   try {
     const v = JSON.parse(fs.readFileSync(f, 'utf8'));
-    return isPlainObj(v) && v.v === 1 ? v : null;
+    return isPlainObj(v) && v.v === CACHE_V ? v : null;
   } catch {
     return null;
   }
@@ -37,13 +46,43 @@ function readCache(f) {
 function writeCache(f, v) {
   if (!f) return;
   try {
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify(v));
+    // The per-session cache holds task text, tool inputs and relative paths, so it is kept
+    // owner-only: 0700 for a directory this call creates, 0600 for the file. `mkdir` only applies
+    // the mode to directories it creates itself, so an existing shared parent such as `~/.cache`
+    // is never re-permissioned; the explicit chmod covers a file an older release created with a
+    // looser mode. Both modes are POSIX-only and Windows largely ignores them.
+    fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(f, JSON.stringify(v), { mode: 0o600 });
+    fs.chmodSync(f, 0o600);
   } catch {
   }
 }
 
+// Child session id recorded by a subagent tool call, or null. The structured field wins; the
+// rendered text is only consulted when it is absent, and the summarizing session's own id is
+// never accepted, because a subagent report may quote the parent's session id back.
+function childIdOf(state, selfId) {
+  if (!isPlainObj(state)) return null;
+  const md = state.metadata;
+  if (isPlainObj(md) && typeof md.sessionID === 'string' && md.sessionID.startsWith('ses_')) {
+    return md.sessionID === selfId ? null : md.sessionID;
+  }
+  if (Array.isArray(state.content)) {
+    for (const c of state.content) {
+      if (!isPlainObj(c) || typeof c.text !== 'string') continue;
+      const m = SES_IN_TEXT.exec(c.text);
+      if (m) return m[1] === selfId ? null : m[1];
+    }
+  }
+  return null;
+}
+
 function summarize(id, session, messages, isActive, projectDir) {
+  // `agent` and `title` are LLM-written summaries of the user's own prompt, which makes them the
+  // most likely place for a pasted credential, so both are redacted on the way into the summary.
+  // `agentType` falls back to 'build' exactly as before when it is missing or empties out.
+  const rawAgent = typeof session?.agent === 'string' && session.agent !== '' ? session.agent : 'build';
+  const agentType = redact(rawAgent);
   const s = {
     started: isoMs(num(session?.time?.created)),
     updated: isoMs(num(session?.time?.updated)),
@@ -58,8 +97,8 @@ function summarize(id, session, messages, isActive, projectDir) {
     todoSource: null,
     segs: [],
     stops: [],
-    agentType: typeof session?.agent === 'string' && session.agent !== '' ? session.agent : 'build',
-    title: typeof session?.title === 'string' ? session.title : '',
+    agentType: agentType !== '' ? agentType : 'build',
+    title: typeof session?.title === 'string' ? redact(session.title) : '',
   };
   const delegations = [];
   const push = (t, kind, text, tool) => {
@@ -77,6 +116,24 @@ function summarize(id, session, messages, isActive, projectDir) {
       if (typeof m.text === 'string' && phpTrim(m.text) !== '') {
         push(t, 'user', 'User instruction', null);
         s.lastKind = 'user';
+      }
+      continue;
+    }
+    // A finished subagent is recorded as a `synthetic` message carrying `metadata.source =
+    // 'subagent'`, `metadata.childID` and a top-level `description`. These are collected as
+    // delegation records too, because the 200-message window keeps the LATEST messages: a long
+    // running subagent pushes its originating tool part out of the window while the completion
+    // record stays. Field names and the description are normalised to match the tool-part record
+    // exactly, so the two sources are interchangeable.
+    if (m.type === 'synthetic') {
+      const md = isPlainObj(m.metadata) ? m.metadata : null;
+      if (md && md.source === 'subagent' && typeof md.childID === 'string' && md.childID.startsWith('ses_')) {
+        delegations.push({
+          agent: typeof md.agent === 'string' ? md.agent : '',
+          description: typeof m.description === 'string' ? safeLine(m.description, 140) : '',
+          created: typeof m.time?.created === 'number' ? m.time.created : 0,
+          child: md.childID === id ? null : md.childID,
+        });
       }
       continue;
     }
@@ -106,8 +163,10 @@ function summarize(id, session, messages, isActive, projectDir) {
         const inp = isPlainObj(p.state?.input) ? p.state.input : {};
         const t = typeof p.time?.created === 'number' ? isoMs(p.time.created) : '';
         const [text, file] = describeTool(String(p.name || ''), inp, projectDir);
+        // `describeTool` already redacts the path; redaction here is idempotent and keeps the
+        // invariant local: nothing reaches `s.files` without passing through `redact`.
         if (file !== null && !s.files.includes(file)) {
-          s.files.push(file);
+          s.files.push(redact(file));
           if (s.files.length > FILES_KEEP) s.files.splice(0, s.files.length - FILES_KEEP);
         }
         if (p.name === 'subagent') {
@@ -115,20 +174,8 @@ function summarize(id, session, messages, isActive, projectDir) {
             agent: typeof inp.agent === 'string' ? inp.agent : '',
             description: typeof inp.description === 'string' ? safeLine(inp.description, 140) : '',
             created: typeof p.time?.created === 'number' ? p.time.created : 0,
-            child: null,
+            child: childIdOf(p.state, id),
           };
-          const st = p.state;
-          if (isPlainObj(st) && Array.isArray(st.content)) {
-            for (const c of st.content) {
-              if (isPlainObj(c) && typeof c.text === 'string') {
-                const m = /sessionID="(ses_[A-Za-z0-9]+)"/.exec(c.text);
-                if (m) {
-                  dg.child = m[1];
-                  break;
-                }
-              }
-            }
-          }
           delegations.push(dg);
         }
         push(t, 'tool', text, String(p.name || ''));
@@ -208,7 +255,9 @@ export async function scanSource({ projectDir, storageDir, cfg, nowSec }) {
   // checkout), and none of them is authoritative: `time.active` gets touched on any row, so ranking
   // by it picks the wrong one and silently hides every session of the newest row. union the
   // sessions of all matching rows instead, deduped by session id.
-  const rows = (Array.isArray(projects) ? projects : []).filter((x) => isPlainObj(x) && normDir(x.canonical || '') === want);
+  // /api/project returns a bare array today; accept a {data:…} envelope too so a future
+  // change of shape shows up as an empty dashboard rather than a silent one.
+  const rows = (Array.isArray(projects) ? projects : values(projects)).filter((x) => isPlainObj(x) && normDir(x.canonical || '') === want);
   if (!rows.length) return empty;
   let parts = [];
   let active;
@@ -265,14 +314,28 @@ export async function scanSource({ projectDir, storageDir, cfg, nowSec }) {
     }
     const { s, delegations } = summarize(x.id, x, messages, running.has(x.id), projectDir);
     buildSegs(s, cfg.cooldown * 1000);
-    writeCache(cf, { v: 1, updated: upd, scopeOk: true, s, delegations });
+    writeCache(cf, { v: CACHE_V, updated: upd, scopeOk: true, s, delegations });
     sums.set(x.id, { s, delegations });
   }
   const delegByParent = new Map();
   for (const [id, v] of sums) delegByParent.set(id, v.delegations);
-  const exactDesc = new Map(); 
-  for (const dl of delegByParent.values()) {
-    for (const d of dl) if (d.child && d.description !== '') exactDesc.set(d.child, d.description);
+  // Exact child-id -> description map, plus the set of delegation records already claimed by an
+  // exact match. The claim set is what keeps the mapping 1:1: without it, several children whose
+  // session id is not recoverable all fell through to the positional heuristic below and were
+  // handed the SAME most recent delegation, which is why every running subagent rendered with the
+  // same title. A record claimed here is also removed from the positional pool below.
+  const exactDesc = new Map();
+  const claimedDel = new Map();
+  for (const [pid, dl] of delegByParent) {
+    const used = new Set();
+    claimedDel.set(pid, used);
+    for (let i = 0; i < dl.length; i += 1) {
+      const d = dl[i];
+      if (d.child && d.description !== '') {
+        exactDesc.set(d.child, d.description);
+        used.add(i);
+      }
+    }
   }
   const mains = [];
   for (const x of roots) {
@@ -288,12 +351,29 @@ export async function scanSource({ projectDir, storageDir, cfg, nowSec }) {
     if (exactDesc.has(x.id)) {
       desc = exactDesc.get(x.id);
     } else {
+      // Positional fallback for a child whose id was not recoverable. Still 1:1: `kids` is walked
+      // in creation order and each delegation record is consumed at most once per parent, so no
+      // two children can end up with the same description. Ties break on the record's index in
+      // `delegations`, which is message order and therefore identical in both runtimes.
       const dl = delegByParent.get(x.parentID) || [];
-      const cands = dl.filter((d) => d.created <= num(x.time?.created));
-      const same = cands.filter((d) => d.agent === (x.agent || ''));
-      const pick = (same.length ? same : cands).sort((a, b) => b.created - a.created)[0];
-      if (pick && pick.description !== '') desc = pick.description;
-      else if (v.s.title !== '') desc = safeLine(oneLine(x.title || '', 140), 140);
+      let used = claimedDel.get(x.parentID);
+      if (used === undefined) {
+        used = new Set();
+        claimedDel.set(x.parentID, used);
+      }
+      const cands = [];
+      for (let i = 0; i < dl.length; i += 1) {
+        if (!used.has(i) && dl[i].created <= num(x.time?.created)) cands.push(i);
+      }
+      const same = cands.filter((i) => dl[i].agent === (x.agent || ''));
+      const pool = same.length ? same : cands;
+      pool.sort((a, b) => dl[b].created - dl[a].created || a - b);
+      const pick = pool[0];
+      if (pick !== undefined) {
+        used.add(pick);
+        if (dl[pick].description !== '') desc = dl[pick].description;
+      }
+      if (desc === '' && v.s.title !== '') desc = safeLine(oneLine(x.title || '', 140), 140);
     }
     runs.push({
       ...v.s,

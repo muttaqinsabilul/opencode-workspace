@@ -29,7 +29,7 @@ final class WHttp
         if ($name[0] === '[' || preg_match('/^\d{1,3}(\.\d{1,3}){3}$/', $name)) {
             return true;
         }
-        if ($name === 'localhost' || str_ends_with($name, '.localhost') || str_ends_with($name, '.trycloudflare.com')) {
+        if ($name === 'localhost' || str_ends_with($name, '.localhost')) {
             return true;
         }
         foreach (explode(',', strtolower($extra)) as $x) {

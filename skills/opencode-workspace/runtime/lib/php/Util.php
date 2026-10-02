@@ -8,14 +8,67 @@ final class WUtil
         return mb_strlen($s) > $n ? mb_substr($s, 0, $n - 1) . '…' : $s;
     }
 
+    // Masks credential shapes in text that reaches the browser. Every pattern is commented with
+    // the concrete secret class it covers, and every length threshold exists so ordinary prose
+    // and the dashboard's own identifiers (session ids `ses_...`, `sh_...`/`msg_...` record ids,
+    // project titles) survive untouched. The alternation order is identical in util.mjs and is
+    // significant: the specific patterns run before the broad ones.
     public static function redact(string $s): string
     {
         $s = (string) preg_replace('/(pass(word)?|sandi|secret|token|api[_-]?key)(["\'\s]*[:=]\s*)(\S+)/i', '$1$3•••', $s);
+        // mysql/psql client option `--login=user:secret`.
         $s = (string) preg_replace("/--login=['\"]?[^'\"\\s]+/", '--login=•••', $s);
+        // Named credential parameters whose keyword is followed by MORE IDENTIFIER CHARACTERS,
+        // so the plain keyword rule above can never reach the separator: AWS
+        // `aws_secret_access_key` and `aws_session_token`, the shorter `secret_access_key`, Azure
+        // storage `SharedAccessKey=` / `AccountKey=` and `SharedAccessSignature=` (SAS URI), OAuth
+        // `client_secret`, `private_key`, `sas_token`, and the `pwd=` alias used by SQL Server /
+        // IIS / ODBC connection strings. The value stops at `;`/`&` so the rest of a connection
+        // string stays readable.
+        $s = (string) preg_replace('/\b(aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|secret[_-]?access[_-]?key|shared[_-]?access[_-]?(?:key|signature)|account[_-]?key|client[_-]?secret|private[_-]?key|sas[_-]?token|pwd)(["\'\s]*[:=]\s*)([^\s;&]+)/i', '$1$2•••', $s);
+        // Azure SAS URI signature `?...&sig=<base64>` — the query-string spelling of the account
+        // key, which is too short a keyword to put in the alternation above, so it needs its own
+        // 16-character threshold to stay clear of ordinary `sig=` text. `%` is allowed because a
+        // real SAS signature is percent-encoded base64 (`%2F`, `%2B`).
+        $s = (string) preg_replace('/\bsig=([A-Za-z0-9+\/_=%-]{16,})/', 'sig=•••', $s);
+        // PEM-armoured private keys (RSA / EC / OPENSSH / PGP / ENCRYPTED, with or without the
+        // ` BLOCK` suffix). A complete block is consumed up to its END marker; a header without a
+        // matching END (truncated paste, or a header line after `firstLine`) still swallows the
+        // rest of that line, so no base64 body survives. An END marker on its own is masked too.
+        $s = (string) preg_replace('/-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|[^\s]*)/', '-----BEGIN PRIVATE KEY-----•••', $s);
+        $s = (string) preg_replace('/-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/', '-----END PRIVATE KEY-----•••', $s);
+        // OpenAI-style `sk-...` API keys.
         $s = (string) preg_replace('/\bsk-[A-Za-z0-9_\-]{8,}/', 'sk-•••', $s);
+        // GitHub PAT family, Slack legacy tokens, AWS access key ids.
         $s = (string) preg_replace('/\b(gh[pousr]_[A-Za-z0-9]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/', '•••', $s);
+        // Vendor tokens with a fixed prefix: HuggingFace `hf_...`, GitLab `glpat-...`,
+        // DigitalOcean `dop_v1_...`, Shopify Admin `shpat_`/`shppa_`/`shpca_`/`shpss_` (32 hex),
+        // Slack app-level `xapp-...`. Each threshold is at or below the real token length, so a
+        // truncated value is still masked while an ordinary identifier that merely shares the
+        // prefix is not.
+        $s = (string) preg_replace('/\bhf_[A-Za-z0-9]{16,}/', 'hf_•••', $s);
+        $s = (string) preg_replace('/\bglpat-[A-Za-z0-9_\-]{16,}/', 'glpat-•••', $s);
+        $s = (string) preg_replace('/\bdop_v1_[A-Za-z0-9]{32,}/', 'dop_v1_•••', $s);
+        $s = (string) preg_replace('/\bshp(at|pa|ca|ss)_[a-f0-9]{32,}/i', 'shp$1_•••', $s);
+        $s = (string) preg_replace('/\bxapp-[A-Za-z0-9-]{10,}/', 'xapp-•••', $s);
+        // Slack incoming-webhook URL: `https://hooks.slack.com/services/T.../B.../token` is a
+        // bearer credential, so the whole path is masked and only the host survives.
+        $s = (string) preg_replace('/\bhooks\.slack\.com\/services\/[A-Za-z0-9\/_-]{10,}/', 'hooks.slack.com/services/•••', $s);
+        // JSON Web Token, i.e. `header.payload.signature` in base64url. `eyJ` is base64url for
+        // `{"`, which every JWT header starts with; each segment needs 4 characters so
+        // `a.b.c`-style prose is not eaten. An unsigned (`alg:none`) token has an empty third
+        // segment, hence `*`.
+        $s = (string) preg_replace('/\beyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]*/', '•••', $s);
+        // `Authorization: Bearer <opaque token>` and `Basic <base64>`. The value must be at least
+        // 20 characters and must sit on the same line, so a prose sentence ("bearer of bad news")
+        // is left alone while any real credential is masked. The keyword is kept, matching the
+        // `sk-•••` style.
+        $s = (string) preg_replace('/\b(Bearer|Basic)[ \t]+[A-Za-z0-9._~+\/=\-]{20,}/i', '$1 •••', $s);
+        // 40+ hex characters: bare digests, commit hashes, generic API keys.
         $s = (string) preg_replace('/\b[a-f0-9]{40,}\b/i', '•••', $s);
+        // e-mail addresses keep their shape: local part and domain are masked separately.
         $s = (string) preg_replace('/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/', '•••@•••', $s);
+        // URL userinfo: `scheme://user:password@host`.
         return (string) preg_replace('~(\b[a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@~i', '$1•••@', $s);
     }
 
@@ -122,11 +175,13 @@ final class WUtil
     {
         $input = (is_array($inp) && ($inp === [] || !array_is_list($inp))) ? $inp : [];
         $str = static fn($k) => isset($input[$k]) && is_string($input[$k]) ? $input[$k] : '';
+        // File paths come from tool input, which is attacker-influenced text, so the path is redacted
+        // before it is shown or stored: a path segment can be a pasted key or an e-mail address.
         $fp = static function ($v) use ($projectDir) {
             if (!is_string($v) || $v === '') {
                 return null;
             }
-            return WUtil::relPath($v, $projectDir);
+            return WUtil::redact(WUtil::relPath($v, $projectDir));
         };
         switch ($name) {
             case 'read': {

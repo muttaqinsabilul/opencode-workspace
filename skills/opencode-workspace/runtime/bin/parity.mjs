@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,24 +17,82 @@ const FORBID = [
   /\bsk-(?!•)[A-Za-z0-9_-]{8,}/, /\bghp_[A-Za-z0-9]{20,}/, /\bAKIA[0-9A-Z]{16}\b/,
   ...process.argv.slice(2).filter((a) => a.startsWith('--forbid=')).map((a) => new RegExp(a.slice(9))),
 ];
-const STORE = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-parity-'));
+// Hermetic run: every byte either runtime writes lands inside TMP and is gone
+// when we exit. XDG_CACHE_HOME is what both runtimes resolve
+// <cache>/opencode-workspace/registry.json from, so pointing it at TMP keeps
+// the developer's real registry untouched.
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-parity-'));
+const STORE = path.join(TMP, 'storage');
+const CACHE = path.join(TMP, 'cache');
+fs.mkdirSync(STORE, { recursive: true });
+const IS_WIN = process.platform === 'win32';
 const procs = [];
 const problems = [];
 const ok = [];
-const cleanup = () => {
-  for (const p of procs) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Windows has no signal delivery: child.kill() terminates the direct child
+// only, never its tree, and a php -S that outlives us keeps the port bound.
+// taskkill /T covers the tree, /F makes it unconditional.
+function killTree(p) {
+  if (!p || !p.pid) return;
+  try {
+    p.kill();
+  } catch {
+  }
+  if (IS_WIN) {
     try {
-      p.kill('SIGTERM');
+      spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
     } catch {
     }
   }
-  fs.rmSync(STORE, { recursive: true, force: true });
+}
+const portFree = (port) => new Promise((resolve) => {
+  const s = net.connect({ host: '127.0.0.1', port });
+  let settled = false;
+  const done = (v) => {
+    if (!settled) {
+      settled = true;
+      s.destroy();
+      resolve(v);
+    }
+  };
+  s.on('connect', () => done(false));
+  s.on('error', () => done(true));
+  setTimeout(() => done(true), 1000);
+});
+const cleanup = () => {
+  for (const p of procs) killTree(p);
+  fs.rmSync(TMP, { recursive: true, force: true });
 };
+// Same as cleanup, but waits until both ports are actually free so a
+// following run can bind them.
+async function shutdown() {
+  for (const p of procs) killTree(p);
+  for (const port of [PHP_PORT, NODE_PORT]) {
+    let free = false;
+    for (let i = 0; i < 50 && !free; i++) {
+      await sleep(100);
+      for (const p of procs) killTree(p);
+      free = await portFree(port);
+    }
+    if (!free) problems.push(`port ${port} still bound after cleanup`);
+  }
+  fs.rmSync(TMP, { recursive: true, force: true });
+}
 process.on('exit', cleanup);
-for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => process.exit(130));
+for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => {
+  cleanup();
+  process.exit(130);
+});
+for (const s of ['uncaughtException', 'unhandledRejection']) process.on(s, (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
 
 function start(cmd, args, env) {
-  const p = spawn(cmd, args, { cwd: RUNTIME, env: { ...process.env, WORKSPACE_PROJECT: PROJECT, WORKSPACE_STORAGE: STORE, ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const p = spawn(cmd, args, { cwd: RUNTIME, env: { ...process.env, WORKSPACE_PROJECT: PROJECT, WORKSPACE_STORAGE: STORE, XDG_CACHE_HOME: CACHE, ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
   p.stderr.on('data', (d) => {
     err += d;
@@ -120,76 +179,78 @@ const normLive = (s) => {
   fix(s);
 };
 
-const phpErr = start('php', ['-S', `127.0.0.1:${PHP_PORT}`, '-t', 'public', 'public/index.php'], {});
-const nodeErr = start(process.execPath, ['bin/serve-node.mjs'], { WORKSPACE_PORT: String(NODE_PORT), WORKSPACE_BIND: '127.0.0.1' });
-const P = `http://127.0.0.1:${PHP_PORT}`;
-const N = `http://127.0.0.1:${NODE_PORT}`;
-const up = (await waitUp(P, 'PHP', phpErr)) & (await waitUp(N, 'Node', nodeErr));
+try {
+  const phpErr = start('php', ['-S', `127.0.0.1:${PHP_PORT}`, '-t', 'public', 'public/index.php'], {});
+  const nodeErr = start(process.execPath, ['bin/serve-node.mjs'], { WORKSPACE_PORT: String(NODE_PORT), WORKSPACE_BIND: '127.0.0.1' });
+  const P = `http://127.0.0.1:${PHP_PORT}`;
+  const N = `http://127.0.0.1:${NODE_PORT}`;
+  const up = (await waitUp(P, 'PHP', phpErr)) & (await waitUp(N, 'Node', nodeErr));
 
-if (up) {
-  let sp;
-  let sn;
-  for (let round = 1; round <= ROUNDS; round++) {
-    const [rp, rn] = await Promise.all([get(P, '/workspace/api/state'), get(N, '/workspace/api/state')]);
-    sp = await rp.json();
-    sn = await rn.json();
-    normLive(sp);
-    normLive(sn);
-    const d = diff(sp, sn, '$', new Set(['now']));
-    check(`state round ${round} identical (${sp.runs?.length ?? 0} run, ${sp.feed?.length ?? 0} event, ${sp.freelancers?.length ?? 0} freelancer)`, d.length === 0, `\n    ${d.slice(0, 25).join('\n    ')}`);
-  }
-  const raw = JSON.stringify(sp) + JSON.stringify(sn);
-  for (const re of FORBID) check(`no leak of ${re}`, !re.test(raw), (raw.match(re) || [''])[0].slice(0, 60));
-
-  const [hp, hn] = await Promise.all([get(P, '/workspace'), get(N, '/workspace')]);
-  const [tp, tn] = [await hp.text(), await hn.text()];
-  check('/workspace 200 on both', hp.status === 200 && hn.status === 200, `${hp.status}/${hn.status}`);
-  const cfgOf = (t) => {
-    const m = /window\.WORKSPACE = (.*?);<\/script>/s.exec(t);
-    try {
-      return m ? JSON.parse(m[1]) : null;
-    } catch {
-      return null;
+  if (up) {
+    let sp;
+    let sn;
+    for (let round = 1; round <= ROUNDS; round++) {
+      const [rp, rn] = await Promise.all([get(P, '/workspace/api/state'), get(N, '/workspace/api/state')]);
+      sp = await rp.json();
+      sn = await rn.json();
+      normLive(sp);
+      normLive(sn);
+      const d = diff(sp, sn, '$', new Set(['now']));
+      check(`state round ${round} identical (${sp.runs?.length ?? 0} run, ${sp.feed?.length ?? 0} event, ${sp.freelancers?.length ?? 0} freelancer)`, d.length === 0, `\n    ${d.slice(0, 25).join('\n    ')}`);
     }
-  };
-  const cd = diff(cfgOf(tp), cfgOf(tn));
-  check('window.WORKSPACE identical & valid', cfgOf(tp) !== null && cd.length === 0, cd.join('; '));
-  check('<title> identical', (/<title>(.*?)<\/title>/.exec(tp) || [])[1] === (/<title>(.*?)<\/title>/.exec(tn) || [])[1]);
-  check('<title> Opencode Workspace', /Opencode Workspace/.test(tp) && /Opencode Workspace/.test(tn));
-  for (const h of ['x-robots-tag', 'referrer-policy', 'x-content-type-options', 'x-frame-options', 'content-security-policy']) {
-    check(`header ${h}`, !!hp.headers.get(h) && hp.headers.get(h) === hn.headers.get(h), `${hp.headers.get(h)} / ${hn.headers.get(h)}`);
-  }
-  const [pp, pn] = await Promise.all([get(P, '/workspace/api/ping'), get(N, '/workspace/api/ping')]);
-  const [jp, jn] = [await pp.json(), await pn.json()];
-  check('/workspace/api/ping identical (except runtime)', jp.app === 'opencode-workspace' && jp.project === jn.project && jp.runtime === 'php' && jn.runtime === 'node');
-  const [ap, an] = await Promise.all([get(P, '/workspace/assets/workspace.js'), get(N, '/workspace/assets/workspace.js')]);
-  check('/workspace/assets/workspace.js identical', ap.status === 200 && an.status === 200 && (await ap.text()) === (await an.text()));
-  const etag = an.headers.get('etag');
-  check('ETag same & 304', etag === ap.headers.get('etag') && (await get(N, '/workspace/assets/workspace.js', { 'If-None-Match': etag })).status === 304
-    && (await get(P, '/workspace/assets/workspace.js', { 'If-None-Match': etag })).status === 304);
-  for (const bad of [
-    '/workspace/assets/..%2F..%2Flib%2Fphp%2FConfig.php', '/workspace/assets/..%2Fdefaults.json', '/workspace/assets/%2e%2e/%2e%2e/defaults.json',
-    '/workspace/assets/../../bin/workspace.sh', '/workspace/assets/vendor/three/LICENSE', '/workspace/api/doc?path=README.md', '/workspace/evidence/x.png',
-    '/workspace/no-such-page', '/lib/php/Config.php', '/defaults.json', '/views/page.html', '/public/index.php', '/workspace/assets/%00.js',
-  ]) {
-    const [bp, bn] = await Promise.all([get(P, bad), get(N, bad)]);
-    check(`404 ${bad}`, bp.status === 404 && bn.status === 404, `PHP ${bp.status} / Node ${bn.status}`);
-  }
-  for (const [host, want] of [['evil.example.test', 421], ['evil.example.test:8788', 421], ['abc-def.trycloudflare.com', 200], ['localhost:8788', 200], ['192.168.1.5:8788', 200]]) {
-    const [xp, xn] = await Promise.all([hostGet(PHP_PORT, '/workspace/api/ping', host), hostGet(NODE_PORT, '/workspace/api/ping', host)]);
-    check(`Host ${host} → ${want}`, xp === want && xn === want, `PHP ${xp} / Node ${xn}`);
-  }
-  const [mp, mn] = await Promise.all([rawHttp(P, '/workspace/api/state', {}, 'POST'), rawHttp(N, '/workspace/api/state', {}, 'POST')]);
-  check('POST rejected (405)', mp.status === 405 && mn.status === 405, `PHP ${mp.status} / Node ${mn.status}`);
-  const [rp, rn] = await Promise.all([get(P, '/'), get(N, '/')]);
-  check('/ → 302 /workspace', rp.status === 302 && rn.status === 302 && rp.headers.get('location') === '/workspace' && rn.headers.get('location') === '/workspace');
-  for (const oldP of ['/kantor', '/kantor/', '/kantor/api/ping', '/kantor/api/state']) {
-    const [bp, bn] = await Promise.all([get(P, oldP), get(N, oldP)]);
-    check(`${oldP} → 404`, bp.status === 404 && bn.status === 404, `PHP ${bp.status} / Node ${bn.status}`);
-  }
-}
+    const raw = JSON.stringify(sp) + JSON.stringify(sn);
+    for (const re of FORBID) check(`no leak of ${re}`, !re.test(raw), (raw.match(re) || [''])[0].slice(0, 60));
 
-cleanup();
+    const [hp, hn] = await Promise.all([get(P, '/workspace'), get(N, '/workspace')]);
+    const [tp, tn] = [await hp.text(), await hn.text()];
+    check('/workspace 200 on both', hp.status === 200 && hn.status === 200, `${hp.status}/${hn.status}`);
+    const cfgOf = (t) => {
+      const m = /window\.WORKSPACE = (.*?);<\/script>/s.exec(t);
+      try {
+        return m ? JSON.parse(m[1]) : null;
+      } catch {
+        return null;
+      }
+    };
+    const cd = diff(cfgOf(tp), cfgOf(tn));
+    check('window.WORKSPACE identical & valid', cfgOf(tp) !== null && cd.length === 0, cd.join('; '));
+    check('<title> identical', (/<title>(.*?)<\/title>/.exec(tp) || [])[1] === (/<title>(.*?)<\/title>/.exec(tn) || [])[1]);
+    check('<title> Opencode Workspace', /Opencode Workspace/.test(tp) && /Opencode Workspace/.test(tn));
+    for (const h of ['x-robots-tag', 'referrer-policy', 'x-content-type-options', 'x-frame-options', 'content-security-policy']) {
+      check(`header ${h}`, !!hp.headers.get(h) && hp.headers.get(h) === hn.headers.get(h), `${hp.headers.get(h)} / ${hn.headers.get(h)}`);
+    }
+    const [pp, pn] = await Promise.all([get(P, '/workspace/api/ping'), get(N, '/workspace/api/ping')]);
+    const [jp, jn] = [await pp.json(), await pn.json()];
+    check('/workspace/api/ping identical (except runtime)', jp.app === 'opencode-workspace' && jp.project === jn.project && jp.runtime === 'php' && jn.runtime === 'node');
+    const [ap, an] = await Promise.all([get(P, '/workspace/assets/workspace.js'), get(N, '/workspace/assets/workspace.js')]);
+    check('/workspace/assets/workspace.js identical', ap.status === 200 && an.status === 200 && (await ap.text()) === (await an.text()));
+    const etag = an.headers.get('etag');
+    check('ETag same & 304', etag === ap.headers.get('etag') && (await get(N, '/workspace/assets/workspace.js', { 'If-None-Match': etag })).status === 304
+      && (await get(P, '/workspace/assets/workspace.js', { 'If-None-Match': etag })).status === 304);
+    for (const bad of [
+      '/workspace/assets/..%2F..%2Flib%2Fphp%2FConfig.php', '/workspace/assets/..%2Fdefaults.json', '/workspace/assets/%2e%2e/%2e%2e/defaults.json',
+      '/workspace/assets/../../bin/workspace.sh', '/workspace/assets/vendor/three/LICENSE', '/workspace/api/doc?path=README.md', '/workspace/evidence/x.png',
+      '/workspace/no-such-page', '/lib/php/Config.php', '/defaults.json', '/views/page.html', '/public/index.php', '/workspace/assets/%00.js',
+    ]) {
+      const [bp, bn] = await Promise.all([get(P, bad), get(N, bad)]);
+      check(`404 ${bad}`, bp.status === 404 && bn.status === 404, `PHP ${bp.status} / Node ${bn.status}`);
+    }
+    for (const [host, want] of [['evil.example.test', 421], ['evil.example.test:8788', 421], ['abc-def.trycloudflare.com', 421], ['a.trycloudflare.com.evil.test', 421], ['localhost:8788', 200], ['192.168.1.5:8788', 200]]) {
+      const [xp, xn] = await Promise.all([hostGet(PHP_PORT, '/workspace/api/ping', host), hostGet(NODE_PORT, '/workspace/api/ping', host)]);
+      check(`Host ${host} → ${want}`, xp === want && xn === want, `PHP ${xp} / Node ${xn}`);
+    }
+    const [mp, mn] = await Promise.all([rawHttp(P, '/workspace/api/state', {}, 'POST'), rawHttp(N, '/workspace/api/state', {}, 'POST')]);
+    check('POST rejected (405)', mp.status === 405 && mn.status === 405, `PHP ${mp.status} / Node ${mn.status}`);
+    const [rp, rn] = await Promise.all([get(P, '/'), get(N, '/')]);
+    check('/ → 302 /workspace', rp.status === 302 && rn.status === 302 && rp.headers.get('location') === '/workspace' && rn.headers.get('location') === '/workspace');
+    for (const oldP of ['/kantor', '/kantor/', '/kantor/api/ping', '/kantor/api/state']) {
+      const [bp, bn] = await Promise.all([get(P, oldP), get(N, oldP)]);
+      check(`${oldP} → 404`, bp.status === 404 && bn.status === 404, `PHP ${bp.status} / Node ${bn.status}`);
+    }
+  }
+} finally {
+  await shutdown();
+}
 for (const o of ok) console.log(`  ok   ${o}`);
 for (const p of problems) console.log(`  DIFF ${p}`);
 console.log(problems.length ? `PARITY FAILED (${problems.length} problems, ${ok.length} ok)` : `PARITY OK (${ok.length} checks)`);

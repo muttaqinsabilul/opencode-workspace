@@ -272,9 +272,6 @@ export async function buildState({ projectDir, storageDir, cfg, now }) {
   });
   const recent = runs.filter((r) => now - tsMs(r.started) <= 48 * 3600 * 1000).map((r) => r.started);
 
-  let tunnel = phpTrim(readText(storageDir ? path.join(storageDir, 'tunnel-url.txt') : '') ?? '');
-  if (!/^https:\/\/[A-Za-z0-9.-]+(:\d+)?\/workspace$/.test(tunnel)) tunnel = '';
-
   return {
     app: 'opencode-workspace',
     version: VERSION,
@@ -295,7 +292,7 @@ export async function buildState({ projectDir, storageDir, cfg, now }) {
       sessions_active: activeMains,
     },
     spare_desks: cfg.spare_desks,
-    public_url: tunnel !== '' ? tunnel : null,
+    public_url: null,
   };
 }
 

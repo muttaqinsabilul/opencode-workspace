@@ -1,0 +1,19 @@
+# One rule for every text file: LF in the index and LF in the working tree.
+# Git only ever stores LF, so the important half is eol=lf, which also keeps a
+# Windows clone (core.autocrlf=true) byte-identical to a Linux one.
+* text=auto eol=lf
+
+# workspace.sh must never be checked out with CRLF. On POSIX the kernel hands
+# the CR to the interpreter (bad interpreter: /usr/bin/env bash\r) and bash
+# folds every trailing \r into the last token, so `set -u` alone aborts. Pin
+# `text` explicitly so this never depends on git's content sniffing.
+*.sh text eol=lf
+
+# cmd.exe batch parsing (labels, goto, multi-line blocks) is only reliable with
+# CRLF endings. This is the one file type that genuinely needs the exception.
+*.cmd text eol=crlf
+
+# The font is binary. `binary` is -diff -merge -text; the extra -eol cancels the
+# eol=lf that `*` hands out, so this file can never be normalised, diffed or
+# line-split no matter which rule matches last.
+*.woff2 binary -eol

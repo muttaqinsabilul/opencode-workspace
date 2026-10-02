@@ -34,6 +34,59 @@ if (STORAGE) {
 }
 const PROJECT_ID = crypto.createHash('md5').update(PROJECT).digest('hex').slice(0, 12);
 const extraHosts = String(process.env.WORKSPACE_ALLOWED_HOSTS || '');
+const EXPOSE_PATHS = String(process.env.WORKSPACE_EXPOSE_PATHS || '').trim() === '1';
+
+// Access token. Set with WORKSPACE_TOKEN, or let workspace.sh generate one when
+// you start with a non-loopback --bind. It is only demanded from non-loopback
+// peers, so a plain http://127.0.0.1:PORT/workspace stays open on the machine
+// that opted in. No token = every request behaves exactly as before.
+const TOKEN_RE = /^[0-9A-Za-z_-]{16,128}$/;
+const TOKEN_COOKIE = 'workspace_token';
+function cleanToken(v) {
+  const t = typeof v === 'string' ? v.trim() : '';
+  return TOKEN_RE.test(t) ? t : '';
+}
+function activeToken() {
+  const e = cleanToken(process.env.WORKSPACE_TOKEN);
+  return e === '' ? null : e;
+}
+if (String(process.env.WORKSPACE_TOKEN || '').trim() !== '' && cleanToken(process.env.WORKSPACE_TOKEN) === '') {
+  console.error('[workspace] WORKSPACE_TOKEN ignored: use 16-128 characters of A-Z a-z 0-9 _ or -');
+}
+const START_TOKEN = activeToken();
+function isLoopbackBind(b) {
+  return b === '127.0.0.1' || b === 'localhost' || b === '::1' || b === '::ffff:127.0.0.1' || b.startsWith('127.');
+}
+function loopbackPeer(addr) {
+  const a = String(addr || '').replace(/^::ffff:/i, '');
+  return a === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a);
+}
+function tokenEquals(expected, got) {
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(typeof got === 'string' ? got : '', 'utf8');
+  const n = Math.max(a.length, b.length);
+  const ab = Buffer.alloc(n);
+  const bb = Buffer.alloc(n);
+  a.copy(ab);
+  b.copy(bb);
+  // both sides padded to one length: the compare cannot throw on a wrong-length input
+  return a.length === b.length && crypto.timingSafeEqual(ab, bb);
+}
+function cookieToken(req) {
+  const raw = req.headers.cookie;
+  if (typeof raw !== 'string' || raw === '' || raw.length > 4096) return '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0 || part.slice(0, i).trim() !== TOKEN_COOKIE) continue;
+    const v = part.slice(i + 1).trim();
+    try {
+      return decodeURIComponent(v);
+    } catch {
+      return v;
+    }
+  }
+  return '';
+}
 
 const htmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
 const scriptJson = (v) => JSON.stringify(v).replace(/[<>&'\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
@@ -62,6 +115,11 @@ function badgeSvg(state, rawLabel) {
     + `<rect width="${leftW}" height="20" rx="3" fill="#555"/><rect x="${leftW}" width="${rightW}" height="20" rx="3" fill="${fill}"/>`
     + `<g fill="#fff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11" text-anchor="middle">`
     + `<text x="${leftW / 2}" y="14">${label}</text><text x="${leftW + rightW / 2}" y="14">${right}</text></g></svg>`;
+}
+
+function projectBaseName(p) {
+  const parts = String(p).replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1].slice(0, 256) : '';
 }
 
 function registryFile() {
@@ -145,8 +203,28 @@ async function handle(req, res) {
   }
   const p = url.pathname.replace(/\/+$/, '');
   if (p === '' || p === '/index.php') return send(res, 302, { Location: '/workspace' }, '');
+  if (p.startsWith('/workspace')) {
+    const token = activeToken();
+    if (!token) return route(req, res, url, p, null);
+    const q = url.searchParams.get('k');
+    if (q !== null && tokenEquals(token, q)) {
+      // first visit with the link: hand the token to the browser so a reload,
+      // a bookmark and the project switcher keep working without ?k=
+      const cookie = [`${TOKEN_COOKIE}=${token}`, 'Path=/workspace', 'HttpOnly', 'SameSite=Lax'];
+      return route(req, res, url, p, { 'Set-Cookie': cookie.join('; ') });
+    }
+    // loopback peers are the machine that opted in, so they keep the plain local URL.
+    const local = loopbackPeer(req.socket.remoteAddress);
+    if (local || tokenEquals(token, q) || tokenEquals(token, cookieToken(req))) return route(req, res, url, p, null);
+    return send(res, 403, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, 'Workspace token required');
+  }
+  return route(req, res, url, p, null);
+}
+
+async function route(req, res, url, p, headers) {
+  const reply = (status, h, body) => send(res, status, headers ? { ...h, ...headers } : h, body);
   if (p === '/workspace/api/ping') {
-    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+    return reply(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
       JSON.stringify({ app: 'opencode-workspace', project: PROJECT_ID, runtime: 'node' }));
   }
   if (p === '/workspace/api/projects') {
@@ -160,7 +238,9 @@ async function handle(req, res) {
       .map((e) => {
         const t = Date.parse(e.updated);
         const stale = !(Number.isFinite(t) && nowMs - t <= 10 * 60 * 1000);
-        return { ...e, stale, current: e.port === port };
+        // absolute folder path only with WORKSPACE_EXPOSE_PATHS=1; the switcher
+        // labels a project from `project` either way (basename === its own base())
+        return { ...e, id: crypto.createHash('md5').update(e.project).digest('hex').slice(0, 12), project: EXPOSE_PATHS ? e.project : projectBaseName(e.project), stale, current: e.port === port };
       })
       .filter((e) => !e.stale)
       .sort((a, b) => {
@@ -172,7 +252,7 @@ async function handle(req, res) {
         seen.add(e.port);
         return true;
       });
-    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+    return reply(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
       JSON.stringify({ app: 'opencode-workspace', projects }));
   }
   const cfg = loadConfig(RUNTIME, PROJECT);
@@ -181,7 +261,7 @@ async function handle(req, res) {
     const html = page.replace(/\{\{TITLE\}\}|\{\{CONFIG_SCRIPT\}\}/g, (m) => (m === '{{TITLE}}'
       ? htmlEsc(cfg.title)
       : `<script>window.WORKSPACE = ${scriptJson(pageConfig(cfg))};</script>`));
-    return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, html);
+    return reply(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, html);
   }
   if (p === '/workspace/api/state') {
     try {
@@ -189,7 +269,7 @@ async function handle(req, res) {
     } catch {
     }
     const state = await buildState({ projectDir: PROJECT, storageDir: STORAGE, cfg, now: Date.now() });
-    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, JSON.stringify(state));
+    return reply(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, JSON.stringify(state));
   }
   if (p === '/workspace/badge.svg') {
     let svg;
@@ -199,11 +279,11 @@ async function handle(req, res) {
     } catch {
       svg = badgeSvg(null, url.searchParams.get('label'));
     }
-    return send(res, 200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=10' }, svg);
+    return reply(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=10' }, svg);
   }
   if (p.startsWith('/workspace/assets/')) {
     const rel = rawurldecode(p.slice('/workspace/assets/'.length));
-    if (rel === null || rel.includes('\0')) return send(res, 404, {}, '');
+    if (rel === null || rel.includes('\0')) return reply(404, {}, '');
     let base;
     let f;
     let st;
@@ -212,18 +292,18 @@ async function handle(req, res) {
       f = fs.realpathSync(path.join(PUBLIC, 'assets', rel));
       st = fs.statSync(f);
     } catch {
-      return send(res, 404, {}, '');
+      return reply(404, {}, '');
     }
-    if (!f.startsWith(base + path.sep) || !st.isFile()) return send(res, 404, {}, '');
+    if (!f.startsWith(base + path.sep) || !st.isFile()) return reply(404, {}, '');
     const ext = path.extname(f).toLowerCase();
     const ctype = ext === '.js' ? 'text/javascript; charset=utf-8' : ext === '.woff2' ? 'font/woff2' : ext === '.png' ? 'image/png' : null;
-    if (ctype === null) return send(res, 404, {}, '');
+    if (ctype === null) return reply(404, {}, '');
     const etag = `"${Math.floor(st.mtimeMs / 1000).toString(16)}-${st.size.toString(16)}"`;
     const h = { 'Content-Type': ctype, 'Cache-Control': 'public, max-age=3600', ETag: etag };
-    if (req.headers['if-none-match'] === etag) return send(res, 304, h, '');
-    return send(res, 200, { ...h, 'Content-Length': String(st.size) }, req.method === 'HEAD' ? '' : fs.readFileSync(f));
+    if (req.headers['if-none-match'] === etag) return reply(304, h, '');
+    return reply(200, { ...h, 'Content-Length': String(st.size) }, req.method === 'HEAD' ? '' : fs.readFileSync(f));
   }
-  return send(res, 404, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Not found');
+  return reply(404, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Not found');
 }
 
 const port = Number(process.env.WORKSPACE_PORT || 8788);
@@ -231,6 +311,16 @@ const bind = process.env.WORKSPACE_BIND || '127.0.0.1';
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error(`[workspace] invalid port: ${process.env.WORKSPACE_PORT}`);
   process.exit(1);
+}
+if (!isLoopbackBind(bind)) {
+  if (String(process.env.WORKSPACE_ALLOW_LAN || '').trim() !== '1') {
+    console.error(`[workspace] refusing to bind ${bind}: every host that can reach this address would read this project's agent activity with no login. Re-run with WORKSPACE_ALLOW_LAN=1 to accept that, or bind 127.0.0.1.`);
+    process.exit(1);
+  }
+  if (!START_TOKEN) {
+    console.error(`[workspace] refusing to bind ${bind}: WORKSPACE_ALLOW_LAN=1 also needs an access token. Set WORKSPACE_TOKEN to 16-128 characters of A-Z a-z 0-9 _ -.`);
+    process.exit(1);
+  }
 }
 const server = http.createServer((req, res) => {
   handle(req, res).catch((e) => {
@@ -243,7 +333,11 @@ server.on('error', (e) => {
   console.error(`[workspace] server failed: ${e.code === 'EADDRINUSE' ? `port ${port} already in use` : e.message}`);
   process.exit(e.code === 'EADDRINUSE' ? 3 : 1);
 });
-server.listen(port, bind, () => { console.log(`opencode-workspace on http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}/workspace`); console.log('Listening...'); });
+server.listen(port, bind, () => {
+  console.log(`opencode-workspace on http://${bind}:${port}/workspace`);
+  if (!isLoopbackBind(bind)) console.log(`[workspace] listening on ${bind} — reachable from the network, access token required`);
+  console.log('Listening...');
+});
 try {
   touchRegistry(port, loadConfig(RUNTIME, PROJECT).title);
   const t = setInterval(() => {

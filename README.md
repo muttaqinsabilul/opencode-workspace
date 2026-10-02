@@ -1,12 +1,16 @@
 # Opencode Workspace
 
+[![ci](https://github.com/muttaqinsabilul/opencode-workspace/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/muttaqinsabilul/opencode-workspace/actions/workflows/ci.yml)
+
 A 2D workspace floor plan that shows what OpenCode is doing in your project, in real time.
 
 The main session becomes the **Lead** at their desk. Four team members idle in the lounge and walk to their
 desks whenever OpenCode calls a subagent. When the team is busy, **freelancers** come in through the door.
 
-Everything is driven by your local OpenCode service API — no simulated data, no login, no configuration file
-required.
+Everything is driven by your local OpenCode service API — no login, no configuration file required. Session
+data, counts and activity are read live from your OpenCode service with nothing faked. The exception is the
+speech bubbles over idle characters: those are decorative flavour text hardcoded in the browser client, not
+real agent output.
 
 ## Requirements
 
@@ -80,8 +84,9 @@ The **Subagent** tab lists active subagents only — each one disappears as soon
 2. Sessions are polled over the service API. Main sessions map to the Lead; child sessions map to team
    members, then to freelancers once the team is full. Assignment is recomputed from the same data on every
    poll, so it is stable across reloads and identical on Node and PHP.
-3. A local server renders the floor plan and serves a JSON state document that the browser polls every 3
-   seconds. The runtime runs from the skill folder and writes nothing into your project.
+3. A local server renders the floor plan and serves a JSON state document that the browser polls every 1
+   second, skipping requests while the tab is hidden. The runtime runs from the skill folder and writes nothing
+   into your project.
 
 Subagent status: `working` (active within 15 min), `done`, or `stopped` (failed, interrupted, or idle for
 15 min).
@@ -117,13 +122,12 @@ Environment overrides: `WORKSPACE_PORT`, `WORKSPACE_RUNTIME` (`node`/`php`), `WO
 ## Commands
 
 ```bash
-workspace.sh start | stop | restart | status | tunnel | tunnel-stop
+workspace.sh start | stop | restart | status
 workspace.sh start --php              # force the PHP runtime
 workspace.sh start --port 9000        # start from a specific port
 ```
 
-`tunnel` exposes the dashboard publicly via `cloudflared`. Anyone with the link can see agent activity, so
-share it deliberately and turn it off with `tunnel-stop`.
+The server binds `127.0.0.1` and is not reachable from another machine.
 
 On Windows, the root `workspace.ps1` and `workspace.cmd` start the server directly instead of going through
 `workspace.sh`. Both default to port `8788` and watch the current working directory. Configuration stays
@@ -169,10 +173,30 @@ animations.
 
 ## Contributing
 
-Issues and pull requests welcome. The server is implemented twice — `runtime/lib/node/*.mjs` and
-`runtime/lib/php/*.php` — and both must stay in sync. After changing either, run
-`node skills/opencode-workspace/runtime/bin/parity.mjs --project=<test-project>` and confirm `PARITY OK`.
-Never include session contents or real project data in examples or screenshots.
+Issues and pull requests welcome.
+
+| Prerequisite | Notes |
+|---|---|
+| Node.js ≥ 18 | Runs the suite |
+| PHP ≥ 8.1 + `mbstring` | Required — the parity half boots `php -S` and fails without it |
+
+Run the whole suite with one command. It lints the JS, compares the Node and PHP servers byte for byte, boots a
+throwaway server for `check.mjs`, asserts the port was released afterwards, and exits non-zero on any failure:
+
+```bash
+node skills/opencode-workspace/runtime/bin/test.mjs [--project=<dir>] [--php-port=8803] [--node-port=8804] [--check-port=8805]
+```
+
+It is plain Node, so it behaves the same in cmd, PowerShell and bash, and its default ports (8803/8804/8805)
+never collide with a dashboard on 8788. `parity.mjs` is the internal Node-vs-PHP comparison that `test.mjs`
+wraps — reach for it only when debugging parity itself.
+
+The server is implemented twice and both sides must change together: `runtime/lib/node/*.mjs` against
+`runtime/lib/php/*.php`, behind the entry points `runtime/bin/serve-node.mjs` and `runtime/public/index.php`. A
+one-sided edit fails the suite. CI runs it on `ubuntu-latest` and `windows-latest` across Node 18, 20 and 22.
+
+Never include real session contents, project paths, or screenshots containing real data in examples, fixtures
+or docs.
 
 ## License
 
