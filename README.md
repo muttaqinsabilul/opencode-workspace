@@ -21,7 +21,7 @@ No npm or Composer dependencies. The browser client is plain Canvas 2D.
 ## Quick start
 
 ```bash
-git clone https://github.com/sabiluldev-bit/opencode-workspace.git
+git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 bash opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start
 ```
 
@@ -125,6 +125,19 @@ workspace.sh start --port 9000        # start from a specific port
 `tunnel` exposes the dashboard publicly via `cloudflared`. Anyone with the link can see agent activity, so
 share it deliberately and turn it off with `tunnel-stop`.
 
+On Windows, the root `workspace.ps1` and `workspace.cmd` start the server directly instead of going through
+`workspace.sh`. Both default to port `8788` and watch the current working directory. Configuration stays
+environment-only, so `workspace.cmd` takes no arguments:
+
+```powershell
+.\workspace.ps1                                        # http://127.0.0.1:8788/workspace
+.\workspace.ps1 -Port 9000 -Project D:\projects\cake-shop
+```
+
+```cmd
+set WORKSPACE_PORT=9000 && set WORKSPACE_PROJECT=D:\projects\cake-shop && workspace.cmd
+```
+
 ## Privacy
 
 - **Read:** task descriptions, tool names, relative file paths, timestamps, token counts.
@@ -163,4 +176,6 @@ Never include session contents or real project data in examples or screenshots.
 
 ## License
 
-[MIT](LICENSE) © muttaqinsabilul. No third-party libraries — the browser client is plain Canvas 2D.
+[MIT](LICENSE) © muttaqinsabilul. No JS framework or runtime dependencies — the browser client is plain Canvas 2D.
+The bundled Plus Jakarta Sans font is the one third-party component, under SIL OFL 1.1; its license text is at
+`skills/opencode-workspace/runtime/public/assets/fonts/OFL.txt`.
