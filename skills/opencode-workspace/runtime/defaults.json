@@ -1,0 +1,17 @@
+{
+  "_note": "Opencode Workspace defaults — read identically by Node server (lib/node) and PHP (lib/php). Optional per-project override: <project>/.opencode/opencode-workspace.json (see README).",
+  "lead": "Jack",
+  "team": ["Alex", "Mia", "Leo", "Emma"],
+  "freelancers": ["Oliver", "Sophia", "Liam", "Ava", "Noah", "Isla", "Ethan", "Ruby", "Lucas", "Chloe", "Mason", "Lily"],
+  "colors": {
+    "lead": "#6a55c9",
+    "team": ["#3f6fd1", "#2f9a6d", "#d9772f", "#c2417a"],
+    "freelancers": ["#0f8fa3", "#9a7418", "#4f7d3a", "#8a4fa8", "#3d7f9e", "#b8452f"]
+  },
+  "window_days": 7,
+  "running_window": 900,
+  "main_active": 90,
+  "cooldown": 60,
+  "spare_desks": 4,
+  "mains_max": 40
+}

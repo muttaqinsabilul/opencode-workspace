@@ -1,0 +1,28 @@
+
+export const SECURITY_HEADERS = {
+  'X-Robots-Tag': 'noindex, nofollow',
+  'Referrer-Policy': 'no-referrer',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+};
+
+export function pageConfig(cfg) {
+  return { title: cfg.title, lead: cfg.lead, team: cfg.team, colors: cfg.colors, spare_desks: cfg.spare_desks };
+}
+
+export function hostAllowed(hostHeader, extra) {
+  if (typeof hostHeader !== 'string' || hostHeader === '') return true; 
+  const h = hostHeader.toLowerCase();
+  const m = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::\d{1,5})?$/.exec(h);
+  if (!m) return false;
+  const name = m[1];
+  if (name.startsWith('[')) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;
+  if (name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.trycloudflare.com')) return true;
+  for (const x of String(extra || '').toLowerCase().split(',')) {
+    const e = x.trim();
+    if (e !== '' && (name === e || (e.startsWith('.') && name.endsWith(e)))) return true;
+  }
+  return false;
+}

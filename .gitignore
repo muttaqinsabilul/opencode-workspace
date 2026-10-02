@@ -1,0 +1,22 @@
+# deps & build
+node_modules/
+vendor/
+dist/
+build/
+coverage/
+
+# logs & OS junk
+*.log
+.DS_Store
+Thumbs.db
+.cache/
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# runtime state (never in repo — lives in ~/.cache/opencode-workspace/)
+*.pid
+server.env
