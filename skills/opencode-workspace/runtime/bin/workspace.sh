@@ -265,7 +265,7 @@ start_server() {
     printf '\n[%s] start %s port %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rt" "$port" >>"$LOG"
     if [ "$rt" = node ]; then
       WORKSPACE_PROJECT="$PROJECT" WORKSPACE_STORAGE="$st_win" WORKSPACE_PORT="$port" WORKSPACE_BIND="$BIND" \
-        WORKSPACE_ALLOW_LAN="${WORKSPACE_ALLOW_LAN:-}" WORKSPACE_TOKEN="$token" WORKSPACE_EXPOSE_PATHS="${WORKSPACE_EXPOSE_PATHS:-}" \
+        WORKSPACE_PORT_STRICT=1 WORKSPACE_ALLOW_LAN="${WORKSPACE_ALLOW_LAN:-}" WORKSPACE_TOKEN="$token" WORKSPACE_EXPOSE_PATHS="${WORKSPACE_EXPOSE_PATHS:-}" \
         nohup node "$RUNTIME/bin/serve-node.mjs" </dev/null >>"$LOG" 2>&1 &
     else
       WORKSPACE_PROJECT="$PROJECT" WORKSPACE_STORAGE="$st_win" WORKSPACE_BIND="$BIND" \

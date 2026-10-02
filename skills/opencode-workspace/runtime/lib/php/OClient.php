@@ -125,7 +125,7 @@ final class WOClient
         $raw = @file_get_contents($svc['url'] . $apiPath, false, $ctx);
         if (!is_string($raw)) {
             self::resetService();
-            throw new RuntimeException("opencode tak terjangkau: {$apiPath}");
+            throw new RuntimeException("opencode unreachable: {$apiPath}");
         }
         $status = 0;
         foreach ($http_response_header ?? [] as $h) {

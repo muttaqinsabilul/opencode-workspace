@@ -81,7 +81,7 @@ function syncFeedFilter() {
   }
 }
 
-/* panel kanan punya dua tab: subagent + aktivitas */
+/* right-hand panel has two tabs: subagent + activity */
 let panelTab = 'agents';
 try {
   const v = localStorage.getItem('workspace.tab');
@@ -151,21 +151,21 @@ function drawRoundRect(ctx, x, y, w, h, r) {
 const TILE = 32;
 const MAP_WIDTH = 1290;
 const MAP_HEIGHT = 876;
-const OUT_X = 1016;              // tepi dinding timur — semua di kanan ini di luar gedung
-const WALK_YARD_X = OUT_X + 124; // sisi trotoar, gerai bakso berdiri di sini
+const OUT_X = 1016;              // east wall edge — everything right of it is outside the building
+const WALK_YARD_X = OUT_X + 124; // pavement side, the food stall stands here
 
-// Studio Utama: baris atas y=250 (kursi y=310), baris bawah y=400 (kursi y=460)
+// Studio Utama: top row y=250 (chairs y=310), bottom row y=400 (chairs y=460)
 const DESK_POS = {
   A0: { gx: 12.875, gy: 9.6875, dir: 'up', label: 'You' },
   A3: { gx: 16.5, gy: 9.6875, dir: 'up', label: 'Leo' },
   A4: { gx: 20.125, gy: 9.6875, dir: 'up', label: 'Emma' },
   A1: { gx: 14.6875, gy: 14.375, dir: 'up', label: 'Alex' },
   A2: { gx: 18.3125, gy: 14.375, dir: 'up', label: 'Mia' },
-  // Studio CX: baris atas y=200 (kursi y=250), bawah y=270 (kursi y=320)
-  B0: { gx: 25.875, gy: 7.8125, dir: 'up', label: 'Cadangan 1' },
-  B1: { gx: 29.0, gy: 7.8125, dir: 'up', label: 'Cadangan 2' },
-  B2: { gx: 25.875, gy: 10.0, dir: 'up', label: 'Cadangan 3' },
-  B3: { gx: 29.0, gy: 10.0, dir: 'up', label: 'Cadangan 4' },
+  // Studio CX: top row y=200 (chairs y=250), bottom y=270 (chairs y=320)
+  B0: { gx: 25.875, gy: 7.8125, dir: 'up', label: 'Spare 1' },
+  B1: { gx: 29.0, gy: 7.8125, dir: 'up', label: 'Spare 2' },
+  B2: { gx: 25.875, gy: 10.0, dir: 'up', label: 'Spare 3' },
+  B3: { gx: 29.0, gy: 10.0, dir: 'up', label: 'Spare 4' },
 };
 
 const DOOR_ENTRANCE = { gx: 4.4, gy: 21.4 };
@@ -306,37 +306,37 @@ const CHATTER_LINES = [
 ];
 
 const CHAT_LINES = [
-  '☕ kopi dulu...',
-  'bakso-nya enak, lho!',
-  'nonton apa nanti?',
+  '☕ coffee first...',
+  'the soup was good, I tell you!',
+  'what to watch later?',
   'please review my PR 🙏',
   'staging all green!',
   '...',
   "let's go, keep moving!",
-  'sholat dulu ya 🙃',
+  'praying first, ok? 🙃',
 ];
 
 const WANDER_MIN_X = 4.2, WANDER_MAX_X = 38, WANDER_MIN_Y = 2.4, WANDER_MAX_Y = 26.4;
 
 const WALK_NODES = {
-  // koridor barat (tulang punggung): x = 10.0 (px 320),
+  // west corridor (backbone): x = 10.0 (px 320),
   hallN: { x: 10.0, y: 1.4 }, hallA: { x: 10.0, y: 5.4 }, hallB: { x: 10.0, y: 14.2 },
   hallC: { x: 10.0, y: 21.9 }, hallD: { x: 10.0, y: 25.8 },
-  // koridor timur: x = 23.3 (px 746)
+  // east corridor: x = 23.3 (px 746)
   eastN: { x: 23.3, y: 1.4 }, eastCX: { x: 23.3, y: 5.4 }, eastGar: { x: 23.3, y: 14.4 },
   eastSan: { x: 23.3, y: 25.6 },
-  // pintu luar (dinding x=110, bukaan y 660..710)
+  // outer door (wall x=110, opening y 660..710)
   door: { x: 2.6, y: 21.4 }, doorE2: { x: 4.6, y: 22.6 },
-  // ruang barat: musolla, nonton tv, warung kopi
+  // west rooms: musolla, nonton tv, warung kopi
   musD: { x: 8.4, y: 5.4 }, musP: { x: 6.5, y: 6.6 },
   tvD: { x: 8.4, y: 14.2 }, tvP: { x: 6.5, y: 16.4 },
   warD: { x: 8.4, y: 22.6 }, warP: { x: 6.6, y: 24.8 },
-  // studio utama: jalur antar baris meja
+  // studio utama: path between desk rows
   stW: { x: 11.0, y: 7.0 }, stN: { x: 13.5, y: 7.0 }, stY: { x: 22.0, y: 7.0 },
   stS: { x: 11.0, y: 11.0 }, stX: { x: 22.0, y: 11.0 }, stDown: { x: 13.75, y: 19.8 },
   // studio cx
   cxTop: { x: 27.4, y: 5.6 }, cxMid: { x: 27.4, y: 10.25 },
-  // pintu timur + halaman bakso (luar gedung)
+  // east door + food-stall yard (outside the building)
   eastDoor: { x: 32.3, y: 14.2 }, bakFront: { x: 33.6, y: 16.4 },
   // ruang santai + ping pong
   san: { x: 27.4, y: 23.6 },
@@ -393,20 +393,20 @@ function findPath(from, to) {
   return [];
 }
 const POIS = [
-  { x: 6.5, y: 6.6, dir: 'up', act: 'sholat sebentar...', dwell: 7000, node: 'musP' },
-  { x: 6.5, y: 16.4, dir: 'up', act: 'nonton film baru...', dwell: 9000, node: 'tvP' },
-  { x: 6.6, y: 24.8, dir: 'up', act: 'ngopi dulu...', dwell: 6000, node: 'warP' },
-  { x: 17.6, y: 24.7, dir: 'up', act: "satu ronde lagi...", dwell: 7000, node: 'ppM' },
-  { x: 12.5, y: 24.7, dir: 'up', act: 'bola liar!', dwell: 6000, node: 'ppW' },
-  { x: 27.4, y: 23.6, dir: 'up', act: 'rebahan sebentar...', dwell: 9000, node: 'san', sit: true },
-  { x: 33.6, y: 17.3, dir: 'up', act: 'bakso, dong!', dwell: 7000, node: 'bakP' },
-  { x: 27.4, y: 10.25, dir: 'up', act: 'ngobrol ringan...', dwell: 6000, node: 'cxMid' },
-  { x: 2.4, y: 21.4, dir: 'right', act: 'segar di luar...', dwell: 6000, node: 'gardenX' },
+  { x: 6.5, y: 6.6, dir: 'up', act: 'quick prayer...', dwell: 7000, node: 'musP' },
+  { x: 6.5, y: 16.4, dir: 'up', act: 'watching a new film...', dwell: 9000, node: 'tvP' },
+  { x: 6.6, y: 24.8, dir: 'up', act: 'coffee first...', dwell: 6000, node: 'warP' },
+  { x: 17.6, y: 24.7, dir: 'up', act: "one more round...", dwell: 7000, node: 'ppM' },
+  { x: 12.5, y: 24.7, dir: 'up', act: 'wild ball!', dwell: 6000, node: 'ppW' },
+  { x: 27.4, y: 23.6, dir: 'up', act: 'lying down for a sec...', dwell: 9000, node: 'san', sit: true },
+  { x: 33.6, y: 17.3, dir: 'up', act: 'meatball soup, please!', dwell: 7000, node: 'bakP' },
+  { x: 27.4, y: 10.25, dir: 'up', act: 'light chat...', dwell: 6000, node: 'cxMid' },
+  { x: 2.4, y: 21.4, dir: 'right', act: 'fresh air out here...', dwell: 6000, node: 'gardenX' },
 ];
 for (const p of POIS) WALK_NODES[p.node] = { x: p.x, y: p.y };
 
-/* Satu titik = satu agent. Tanpa ini dua agent bisa berdiri di spot yang sama
-   (mis. berdua di musolla) dan terlihat seperti satu karakter dobel. */
+/* One point = one agent. Without this two agents could stand on the same spot
+   (e.g. both in the musolla) and look like one doubled-up character. */
 const POI_CLAIM = new Map();
 function claimFree(a) {
   for (const p of POIS) {
@@ -820,53 +820,53 @@ function drawBirchTree(ctx, x, y, r) {
 }
 
 /* =====================================================================
-   Denah baru — 3 kolom + koridor
-   x  110..300  kolom barat   (Musolla / Nonton TV / Warung Kopi)
-   x  303..309  dinding A     |  310..338 koridor barat
-   x  340..722  kolom tengah  (Studio Utama / Ping Pong)
-   x  725..731  dinding B     |  732..758 koridor timur
-   x  760..1012 kolom timur   (Studio CX / Garasi / Ruang Santai)
-   koridor silang: y 38..100, x 310..758
-   x 1016..1290 halaman luar   (trotoar + gerai bakso, di luar dinding)
+   New floor plan — 3 columns + corridors
+   x  110..300  west column   (Musolla / Nonton TV / Warung Kopi)
+   x  303..309  wall A        |  310..338 west corridor
+   x  340..722  middle column (Studio Utama / Ping Pong)
+   x  725..731  wall B        |  732..758 east corridor
+   x  760..1012 east column   (Studio CX / Garasi / Ruang Santai)
+   cross corridor: y 38..100, x 310..758
+   x 1016..1290 outdoor yard  (pavement + gerai bakso, outside the wall)
    ===================================================================== */
 
 function drawFloors(ctx) {
   drawWoodPlanks(ctx, 110, 38, 906, 826);
 
-  // kolom barat
+  // west column
   drawMusollaCarpet(ctx, 114, 38, 186, 264);
   drawStripedLoungeRug(ctx, 122, 380, 170, 220);
   drawCircularFloor(ctx, 114, 628, 186, 236);
 
-  // kolom tengah
+  // middle column
   drawChevronFloor(ctx, 340, 38, 382, 582, PAL.chevronGrey1, PAL.chevronGrey2);
   drawSportFloor(ctx, 340, 628, 382, 236);
 
-  // kolom timur
+  // east column
   drawChevronFloor(ctx, 760, 106, 252, 236, PAL.chevronBlue1, PAL.chevronBlue2);
   drawConcreteFloor(ctx, 760, 348, 252, 274);
   drawLatticeRug(ctx, 768, 636, 236, 220);
 }
 
 function drawWalls(ctx) {
-  // shell luar
+  // outer shell
   drawHWall(ctx, 110, 24, 906, 14);
   drawVWall(ctx, 110, 24, 844, 8);
   drawVWall(ctx, 1016, 24, 844, 8);
   drawHWall(ctx, 110, 868, 906, 8);
 
-  // dinding pemisah kolom
+  // column divider wall
   drawVWall(ctx, 306, 24, 844, 6);
   drawVWall(ctx, 728, 24, 844, 6);
 
-  // dinding antar ruang
+  // wall between rooms
   drawHWall(ctx, 110, 300, 196, 8);
   drawHWall(ctx, 110, 620, 196, 8);
   drawHWall(ctx, 340, 620, 382, 8);
   drawHWall(ctx, 760, 340, 252, 8);
   drawHWall(ctx, 760, 620, 252, 8);
 
-  // bukaan pintu
+  // doorway
   ctx.fillStyle = PAL.woodBeige1;
   ctx.fillRect(303, 150, 6, 50);
   ctx.fillRect(303, 430, 6, 50);
@@ -890,7 +890,7 @@ function drawVWall(ctx, x, y, h, w) {
   ctx.fillStyle = PAL.wallTop; ctx.fillRect(x - w / 2, y, 2, h);
 }
 
-/* ---------- lantai khusus ---------- */
+/* ---------- special floors ---------- */
 
 function drawMusollaCarpet(ctx, x, y, w, h) {
   ctx.save();
@@ -972,7 +972,7 @@ function drawMusolla(ctx) {
 
   for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) drawPrayerRug(ctx, 124 + c * 70, 152 + r * 54);
 
-  // tempat wudu
+  // ablution spot
   ctx.fillStyle = PAL.shadow; ctx.fillRect(116, 98, 34, 22);
   ctx.fillStyle = '#e2e8f0'; ctx.fillRect(114, 96, 34, 22);
   ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1; ctx.strokeRect(114.5, 96.5, 33, 21);
@@ -982,14 +982,14 @@ function drawMusolla(ctx) {
   ctx.fillStyle = '#38bdf8'; ctx.fillRect(152, 98, 8, 16);
   ctx.fillStyle = '#bae6fd'; ctx.fillRect(152, 98, 8, 3);
 
-  // jam dinding
+  // wall clock
   ctx.fillStyle = '#f8fafc'; ctx.beginPath(); ctx.arc(246, 120, 9, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.5; ctx.stroke();
   ctx.fillStyle = '#334155'; ctx.fillRect(245, 114, 2, 7);
 
   drawWaterCooler(ctx, 270, 128);
 
-  // rak alas kaki
+  // shoe rack
   ctx.fillStyle = '#78350f'; ctx.fillRect(232, 268, 36, 28);
   ctx.fillStyle = '#92400e'; ctx.fillRect(232, 268, 36, 3);
   ctx.strokeStyle = '#5b3410'; ctx.lineWidth = 1; ctx.strokeRect(232.5, 268.5, 35, 27);
@@ -1029,7 +1029,7 @@ function drawNontonTV(ctx) {
   ctx.restore();
   ctx.fillStyle = '#64748b'; ctx.fillRect(124, 397, 168, 3);
 
-  // rak media
+  // media shelf
   ctx.fillStyle = PAL.shadow; ctx.fillRect(126, 406, 172, 20);
   ctx.fillStyle = '#c58b54'; ctx.fillRect(124, 404, 172, 20);
   ctx.fillStyle = '#935823'; ctx.fillRect(124, 404, 172, 3);
@@ -1046,14 +1046,14 @@ function drawNontonTV(ctx) {
   drawBeanBag(ctx, 268, 524, '#2563eb');
   drawCamelLeatherSofa(ctx, 208, 570, 130, 24);
 
-  // keranjang snack
+  // snack basket
   ctx.fillStyle = PAL.shadow; ctx.fillRect(272, 508, 26, 18);
   ctx.fillStyle = '#334155'; ctx.fillRect(270, 506, 26, 18);
   ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1; ctx.strokeRect(270.5, 506.5, 25, 17);
   ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.arc(276, 502, 5, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fbbf24'; ctx.fillRect(284, 498, 8, 6);
 
-  // lampu lantai
+  // floor lamp
   ctx.fillStyle = '#475569'; ctx.fillRect(120, 516, 3, 40);
   ctx.fillStyle = '#fbbf24';
   ctx.beginPath();
@@ -1075,7 +1075,7 @@ function drawBeanBag(ctx, x, y, col) {
 /* ---------- WARUNG KOPI  (x 114..300, y 620..868) ---------- */
 
 function drawWarungKopi(ctx) {
-  // papan menu
+  // menu board
   ctx.fillStyle = '#2f3b34'; ctx.fillRect(120, 650, 84, 54);
   ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 3; ctx.strokeRect(120.5, 650.5, 83, 53);
   ctx.fillStyle = '#e7e5e4';
@@ -1088,7 +1088,7 @@ function drawWarungKopi(ctx) {
   ctx.fillText('teh    4k', 128, 698);
   ctx.textAlign = 'center';
 
-  // etalase kue
+  // cake display case
   ctx.fillStyle = PAL.shadow; ctx.fillRect(216, 662, 82, 40);
   ctx.fillStyle = '#cbd5e1'; ctx.fillRect(214, 660, 82, 40);
   ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1; ctx.strokeRect(214.5, 660.5, 81, 39);
@@ -1106,7 +1106,7 @@ function drawWarungKopi(ctx) {
   ctx.fillStyle = '#7c4a1c';
   for (let i = 0; i < 4; i++) ctx.fillRect(132 + i * 42, 818, 30, 2);
 
-  // mesin espresso
+  // espresso machine
   ctx.fillStyle = PAL.shadow; ctx.fillRect(212, 776, 46, 22);
   ctx.fillStyle = '#b91c1c'; ctx.fillRect(210, 774, 46, 22);
   ctx.fillStyle = '#ef4444'; ctx.fillRect(210, 774, 46, 4);
@@ -1114,7 +1114,7 @@ function drawWarungKopi(ctx) {
   ctx.fillStyle = '#e2e8f0'; ctx.fillRect(216, 782, 8, 10); ctx.fillRect(242, 782, 8, 10);
   ctx.fillStyle = '#475569'; ctx.fillRect(230, 790, 6, 4);
 
-  // tumpukan gelas
+  // stack of glasses
   ctx.fillStyle = '#f8fafc';
   for (let i = 0; i < 4; i++) {
     ctx.beginPath(); ctx.ellipse(180, 790 - i * 5, 9, 4, 0, 0, Math.PI * 2); ctx.fill();
@@ -1187,7 +1187,7 @@ function drawStudioDek(ctx) {
     }
   }
 
-  // mading kecil di pojok kiri studio
+  // small pinboard in the studio's left corner
   ctx.fillStyle = PAL.shadow; ctx.fillRect(348, 470, 62, 52);
   ctx.fillStyle = '#a9784a'; ctx.fillRect(346, 468, 62, 52);
   ctx.fillStyle = '#c58b54'; ctx.fillRect(346, 468, 62, 4);
@@ -1303,7 +1303,7 @@ function drawStudioUtama(ctx) {
     meshChair(dx + deskW / 2, rowB + 60);
   }
 
-  // sudut flex: kursi kerja cadangan
+  // flex corner: backup workstation
   drawSwivelMeshChair(ctx, 700, 500, 'up');
   drawSwivelMeshChair(ctx, 700, 566, 'up');
   drawPottedPlant(ctx, 704, 340, 'monstera');
@@ -1315,7 +1315,7 @@ function drawStudioUtama(ctx) {
 /* ---------- PING PONG  (x 340..722, y 620..868) ---------- */
 
 function drawPingPongRoom(ctx) {
-  // papan skor (di dinding barat ruang)
+  // scoreboard (on the room's west wall)
   ctx.fillStyle = PAL.shadow; ctx.fillRect(354, 638, 84, 44);
   ctx.fillStyle = '#1e293b'; ctx.fillRect(352, 636, 84, 44);
   ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1; ctx.strokeRect(352.5, 636.5, 83, 43);
@@ -1329,7 +1329,7 @@ function drawPingPongRoom(ctx) {
 
   drawPingPongTable(ctx, 452, 690, 132, 76);
 
-  // raket + bola
+  // racket + ball
   ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.ellipse(420, 726, 8, 6, 0.4, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#1f2937'; ctx.fillRect(426, 728, 12, 3);
   ctx.fillStyle = '#f8fafc'; ctx.beginPath(); ctx.arc(628, 728, 3, 0, Math.PI * 2); ctx.fill();
@@ -1339,7 +1339,7 @@ function drawPingPongRoom(ctx) {
   drawBench(ctx, 366, 690, 22, 80);
   drawBench(ctx, 690, 690, 22, 80);
 
-  // gantungan handuk + raket
+  // towel hook + racket
   ctx.fillStyle = '#334155'; ctx.fillRect(366, 648, 54, 8);
   ctx.fillStyle = '#fbbf24'; ctx.fillRect(370, 656, 20, 26);
   ctx.fillStyle = '#0f172a'; ctx.fillRect(370, 662, 20, 2); ctx.fillRect(370, 670, 20, 2);
@@ -1349,7 +1349,7 @@ function drawPingPongRoom(ctx) {
   drawPottedPlant(ctx, 640, 848, 'tall');
 
   drawPillLabel(ctx, 531, 674, 'Ping Pong', '#14532d', '#bbf7d0');
-  // jalur bebas di bawah meja untuk agent
+  // clear walking space under the table for agents
 }
 
 function drawBench(ctx, x, y, w, h) {
@@ -1447,13 +1447,13 @@ function drawStudioCX(ctx) {
 /* ---------- GARASI  (x 760..1012, y 340..620) ---------- */
 
 function drawGarasi(ctx) {
-  // pintu rol
+  // roller door
   ctx.fillStyle = '#94a3b8'; ctx.fillRect(770, 352, 84, 30);
   ctx.fillStyle = '#cbd5e1';
   for (let i = 0; i < 4; i++) ctx.fillRect(772, 354 + i * 7, 80, 5);
   ctx.fillStyle = '#64748b'; ctx.fillRect(768, 350, 88, 3); ctx.fillRect(768, 380, 88, 3);
 
-  // papan alat
+  // tool board
   ctx.fillStyle = '#334155'; ctx.fillRect(770, 400, 60, 96);
   ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1; ctx.strokeRect(770.5, 400.5, 59, 95);
   ctx.fillStyle = '#cbd5e1';
@@ -1465,7 +1465,7 @@ function drawGarasi(ctx) {
   ctx.fillStyle = '#f97316'; ctx.fillRect(778, 472, 44, 4);
   ctx.fillStyle = '#ef4444'; ctx.fillRect(778, 480, 28, 4);
 
-  // ban + jerigen
+  // tyre + jerrycan
   for (let i = 0; i < 3; i++) {
     const ty = 560 + i * 20;
     ctx.fillStyle = '#1e293b';
@@ -1478,7 +1478,7 @@ function drawGarasi(ctx) {
   ctx.strokeStyle = '#7c4a1c'; ctx.lineWidth = 1; ctx.strokeRect(836.5, 560.5, 19, 29);
   ctx.fillStyle = '#78350f'; ctx.fillRect(842, 556, 8, 5);
 
-  // meja kerja + kotak alat
+  // workbench + toolbox
   ctx.fillStyle = PAL.shadow; ctx.fillRect(872, 396, 128, 46);
   ctx.fillStyle = PAL.oakDesk; ctx.fillRect(870, 392, 128, 44);
   ctx.fillStyle = PAL.oakDeskDark; ctx.fillRect(870, 392, 128, 4);
@@ -1492,7 +1492,7 @@ function drawGarasi(ctx) {
   ctx.fillRect(872, 436, 4, 26); ctx.fillRect(992, 436, 4, 26);
   ctx.fillStyle = '#e5e7eb'; ctx.fillRect(950, 420, 6, 10);
 
-  // rak ban
+  // tyre rack
   ctx.fillStyle = '#475569'; ctx.fillRect(770, 512, 96, 6);
   ctx.fillStyle = '#334155'; ctx.fillRect(774, 518, 4, 26); ctx.fillRect(858, 518, 4, 26);
   for (let i = 0; i < 2; i++) {
@@ -1511,16 +1511,16 @@ function drawGarasi(ctx) {
   drawPillLabel(ctx, 886, 368, 'Garasi', '#334155', '#e2e8f0');
 }
 
-/* ---------- HALAMAN LUAR + GERAI BAKSO  (x 1016..1290) ---------- */
+/* ---------- OUTDOOR YARD + GERAI BAKSO  (x 1016..1290) ---------- */
 
 function drawOutdoor(ctx, now) {
   const yardW = WALK_YARD_X - OUT_X;
-  // trotoar
+  // pavement
   ctx.fillStyle = PAL.pavement1; ctx.fillRect(OUT_X, 0, yardW, MAP_HEIGHT);
   ctx.strokeStyle = PAL.pavement2; ctx.lineWidth = 1;
   for (let y = 0; y < MAP_HEIGHT; y += 58) { ctx.beginPath(); ctx.moveTo(OUT_X, y + 0.5); ctx.lineTo(OUT_X + yardW, y + 0.5); ctx.stroke(); }
   for (let x = OUT_X + 58; x < OUT_X + yardW; x += 58) { ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, MAP_HEIGHT); ctx.stroke(); }
-  // kerb + aspal jalan
+  // kerb + road asphalt
   ctx.fillStyle = PAL.curb; ctx.fillRect(OUT_X + yardW, 0, 6, MAP_HEIGHT);
   ctx.fillStyle = PAL.pavement2; ctx.fillRect(OUT_X + yardW - 3, 0, 3, MAP_HEIGHT);
   ctx.fillStyle = PAL.asphalt1; ctx.fillRect(OUT_X + yardW + 6, 0, MAP_WIDTH - OUT_X - yardW - 6, MAP_HEIGHT);
@@ -1530,18 +1530,18 @@ function drawOutdoor(ctx, now) {
   for (let y = 0; y < MAP_HEIGHT; y += 84) ctx.fillRect(OUT_X + yardW + 22, y, 5, 40);
   ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fillRect(OUT_X + yardW + 11, 0, 3, MAP_HEIGHT);
 
-  // jalan setapak dari pintu timur ke trotoar
+  // footpath from the east door to the pavement
   ctx.fillStyle = PAL.pavement2;
   ctx.fillRect(OUT_X - 4, 440, yardW + 4, 34);
 
-  // lampu jalan
+  // street lamp
   ctx.fillStyle = '#475569'; ctx.fillRect(OUT_X + 96, 118, 5, 5); ctx.fillRect(OUT_X + 96, 118, 4, 74);
   ctx.fillStyle = '#fbbf24';
   ctx.beginPath(); ctx.arc(OUT_X + 96, 112, 7, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = 'rgba(251,191,36,0.18)';
   ctx.beginPath(); ctx.arc(OUT_X + 96, 112, 16, 0, Math.PI * 2); ctx.fill();
 
-  // pot bunga + tanaman pinggir jalan
+  // flower pots + roadside plants
   drawPottedPlant(ctx, OUT_X + 26, 262, 'monstera');
   drawPottedPlant(ctx, OUT_X + 30, 636, 'tall');
   drawBirchTree(ctx, OUT_X + 92, 806, 30);
@@ -1555,14 +1555,14 @@ function drawOutdoor(ctx, now) {
 function drawBaksoStall(ctx, now) {
   const cx = WALK_YARD_X - 62; const cy = 470;
 
-  // tenda gerobak
+  // cart canopy
   ctx.fillStyle = 'rgba(15,23,42,0.16)'; ctx.fillRect(cx - 62, cy - 40, 124, 8);
   ctx.fillStyle = '#f8fafc'; ctx.fillRect(cx - 58, cy - 36, 116, 10);
   ctx.fillStyle = '#dc2626';
   for (let i = 0; i < 6; i++) ctx.fillRect(cx - 58 + i * 19, cy - 36, 10, 10);
   ctx.fillStyle = '#7f1d1d'; ctx.fillRect(cx - 58, cy - 27, 116, 2);
 
-  // gerobak bakso
+  // food cart
   ctx.fillStyle = PAL.shadow; ctx.fillRect(cx - 58, cy + 44, 116, 14);
   ctx.fillStyle = '#dc2626'; ctx.fillRect(cx - 54, cy - 6, 108, 46);
   ctx.fillStyle = '#ef4444'; ctx.fillRect(cx - 54, cy - 6, 108, 6);
@@ -1575,7 +1575,7 @@ function drawBaksoStall(ctx, now) {
   ctx.fillStyle = '#94a3b8';
   ctx.beginPath(); ctx.arc(cx - 32, cy + 46, 4, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc(cx + 32, cy + 46, 4, 0, Math.PI * 2); ctx.fill();
-  // panci + uap
+  // stock pot + steam
   ctx.fillStyle = '#334155';
   drawRoundRect(ctx, cx - 34, cy - 26, 46, 22, 5); ctx.fill();
   ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1; ctx.stroke();
@@ -1587,7 +1587,7 @@ function drawBaksoStall(ctx, now) {
     ctx.arc(cx - 26 + i * 14 + Math.sin(ph * 6) * 3, cy - 30 - ph * 26, 5 + ph * 5, 0, Math.PI * 2);
     ctx.fill();
   }
-  // mangkuk
+  // bowl
   for (let i = 0; i < 4; i++) {
     ctx.fillStyle = '#f8fafc';
     ctx.beginPath(); ctx.ellipse(cx + 34, cy - 12 - i * 5, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
@@ -1833,7 +1833,7 @@ function drawStickyNote(ctx, x, y) {
   ctx.fillStyle = '#a16207'; ctx.fillRect(x + 1, y + 4, 5, 1);
 }
 
-// y tepi meja tempat karakter duduk
+// y = table edge where the character sits
 const SEAT_EDGE = {
   A0: 286, A3: 286, A4: 286,
   A1: 436, A2: 436,
@@ -2463,7 +2463,7 @@ function renderUi(d) {
         const last = r.last && r.last[0] && r.last[0].text ? esc(clip(r.last[0].text, 90)) : '';
         return `<div class="run"><span class="c" style="background:${esc(r.color)}"></span><span class="t">${esc(r.task)}</span><span class="chip" style="color:${ui.css}"><i></i>${esc(ui.label)}</span><span class="w">${esc(r.label)} · ${esc(r.agent_type || 'subagent')} · ${esc(runDur(r))}${par}${last ? ` · ${last}` : ''}</span></div>`;
       }).join('')
-      : '<div class="empty">No active subagent. Semua idle — ngopi, nonton TV, atau main ping pong.</div>';
+      : '<div class="empty">No active subagent. Everyone idle — coffee, TV, or ping pong.</div>';
     $('paneActive').innerHTML = '<div class="src">Source: <b>running subagent sessions</b> · removed when finished</div>' + body;
   }
 
@@ -2699,7 +2699,7 @@ async function loadProjects() {
     const cur = String(port) === here;
     const opt = document.createElement('option');
     opt.value = String(port);
-    opt.textContent = `${label} (:${port})${stale ? ' · basi' : ''}${cur ? ' · kini' : ''}`;
+    opt.textContent = `${label} (:${port})${stale ? ' · stale' : ''}${cur ? ' · current' : ''}`;
     if (cur) opt.selected = true;
     sel.appendChild(opt);
   }
@@ -2852,7 +2852,7 @@ function resetCameraFit() {
   clampCam();
 }
 
-/* ---- panel kanan selalu terbuka; cuma perlu ikut pada layout shift ---- */
+/* ---- right panel is always open; it just has to follow the layout shift ---- */
 function watchLayout() {
   if (typeof NARROW_MQ.addEventListener === 'function') NARROW_MQ.addEventListener('change', () => resetCameraFit());
 }

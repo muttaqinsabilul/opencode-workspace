@@ -2,9 +2,9 @@
 // Single entry point for the whole suite, portable on Windows and POSIX shells:
 //   node bin/test.mjs [--project=<dir>] [--php-port=8803] [--node-port=8804] [--check-port=8805]
 // Step 1 is parity.mjs (PHP built-in server vs Node server, compared byte for
-// byte). Step 2 is check.mjs against a throwaway Node server. Every run is
-// hermetic: state, storage and the registry live in a temp dir that is removed
-// before we exit, and no child is allowed to keep a port bound.
+// byte). Step 2 is check.mjs against a throwaway Node server. Step 3 covers port
+// rotation. Every run is hermetic: state, storage and the registry live in a temp
+// dir that is removed before we exit, and no child is allowed to keep a port bound.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -124,6 +124,79 @@ try {
   if (free) pass(`port ${CHECK_PORT} released`);
   else fail(`port ${CHECK_PORT} still bound after cleanup`);
   fs.rmSync(TMP, { recursive: true, force: true });
+}
+
+console.log('\n-- port rotation on a busy port');
+// Regression: the Windows launchers (workspace.ps1 / workspace.cmd) reach serve-node.mjs
+// with no port pre-flight, so a busy port must move up instead of exiting 3.
+const ROT = CHECK_PORT + 1;
+const RTMP = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-rotate-'));
+const rotEnv = (port, strict) => ({
+  ...process.env,
+  WORKSPACE_PROJECT: PROJECT,
+  WORKSPACE_STORAGE: path.join(RTMP, 'storage'),
+  XDG_CACHE_HOME: path.join(RTMP, 'cache'),
+  WORKSPACE_PORT: String(port),
+  WORKSPACE_BIND: '127.0.0.1',
+  ...(strict ? { WORKSPACE_PORT_STRICT: '1' } : { WORKSPACE_PORT_STRICT: '' }),
+});
+const spawnRot = (port, strict) => {
+  const p = spawn(process.execPath, [path.join(BIN, 'serve-node.mjs')], { cwd: RUNTIME, env: rotEnv(port, strict), stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+  p.err = '';
+  p.stderr.on('data', (d) => {
+    p.err += d;
+  });
+  return p;
+};
+const waitPing = async (port, tries) => {
+  for (let i = 0; i < tries; i++) {
+    if (await ping(port)) return true;
+    await sleep(150);
+  }
+  return false;
+};
+// Hold ROT with a plain TCP listener before the rotation cases start. Spawning two
+// servers on the same port and hoping the first one wins is a coin flip on Windows:
+// when the second one won, it held ROT, the first moved up, and the assertion failed
+// for a server that had behaved correctly. A listener we own removes the race.
+const rotBlocker = net.createServer();
+await new Promise((r) => rotBlocker.listen(ROT, '127.0.0.1', r));
+const holder = spawnRot(ROT, false);
+const moved = spawnRot(ROT, false);
+const strict = spawnRot(ROT, true);
+process.on('exit', () => {
+  killTree(holder);
+  killTree(moved);
+  killTree(strict);
+  try { rotBlocker.close(); } catch {}
+  fs.rmSync(RTMP, { recursive: true, force: true });
+});
+try {
+  // rotBlocker already owns ROT, so the loose launcher must step up to ROT + 1.
+  if (await waitPing(ROT + 1, 200) && /already in use/.test(moved.err)) pass(`busy port ${ROT} moves to ${ROT + 1}`);
+  else fail(`busy port ${ROT} did not move to ${ROT + 1}${moved.err ? `: ${moved.err.slice(0, 200)}` : ''}`);
+  const code = await new Promise((r) => {
+    if (strict.exitCode !== null) return r(strict.exitCode);
+    strict.on('exit', r);
+  });
+  // workspace.sh owns the walk and reads exit 3 to retry one port up; strict mode keeps that contract.
+  if (code === 3) pass('WORKSPACE_PORT_STRICT=1 still exits 3 on a busy port');
+  else fail(`WORKSPACE_PORT_STRICT=1 exited ${code}, want 3`);
+} finally {
+  killTree(holder);
+  killTree(moved);
+  killTree(strict);
+  await new Promise((r) => rotBlocker.close(r));
+  let free = false;
+  for (let i = 0; i < 50 && !free; i++) {
+    await sleep(100);
+    killTree(holder);
+    killTree(moved);
+    free = await portFree(ROT) && await portFree(ROT + 1);
+  }
+  if (free) pass(`ports ${ROT}–${ROT + 1} released`);
+  else fail(`ports ${ROT}–${ROT + 1} still bound after cleanup`);
+  fs.rmSync(RTMP, { recursive: true, force: true });
 }
 
 console.log(failed.length ? `\nSUITE FAILED: ${failed.join(', ')}` : '\nSUITE OK');

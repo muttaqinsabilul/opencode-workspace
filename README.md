@@ -117,7 +117,9 @@ Optional. Create `.opencode/opencode-workspace.json` in the project you are watc
 
 Environment overrides: `WORKSPACE_PORT`, `WORKSPACE_RUNTIME` (`node`/`php`), `WORKSPACE_BIND` (default
 `127.0.0.1`; set `0.0.0.0` to reach it from your LAN), `WORKSPACE_STATE_DIR`, `WORKSPACE_ALLOWED_HOSTS`,
-`WORKSPACE_OPENCODE_URL`, `WORKSPACE_OPENCODE_BIN`, `WORKSPACE_OPENCODE_PASSWORD`.
+`WORKSPACE_OPENCODE_URL`, `WORKSPACE_OPENCODE_BIN`, `WORKSPACE_OPENCODE_PASSWORD`. `WORKSPACE_PORT_STRICT=1`
+hands the port walk to `workspace.sh` alone: the server then exits 3 on a busy port instead of moving up, which
+is what the `start` retry loop expects.
 
 ## Commands
 
@@ -130,7 +132,8 @@ workspace.sh start --port 9000        # start from a specific port
 The server binds `127.0.0.1` and is not reachable from another machine.
 
 On Windows, the root `workspace.ps1` and `workspace.cmd` start the server directly instead of going through
-`workspace.sh`. Both default to port `8788` and watch the current working directory. Configuration stays
+`workspace.sh`. Both default to port `8788` and watch the current working directory. A busy port moves up the
+same way it does under `workspace.sh`, so the printed URL is the one to open. Configuration stays
 environment-only, so `workspace.cmd` takes no arguments:
 
 ```powershell

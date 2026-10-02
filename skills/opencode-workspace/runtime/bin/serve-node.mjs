@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const major = Number(process.versions.node.split('.')[0]);
 if (major < 18) {
-  console.error(`Butuh Node ≥ 18 (terpasang ${process.versions.node}).`);
+  console.error(`Need Node ≥ 18 (installed ${process.versions.node}).`);
   process.exit(1);
 }
 
@@ -306,12 +306,19 @@ async function route(req, res, url, p, headers) {
   return reply(404, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Not found');
 }
 
-const port = Number(process.env.WORKSPACE_PORT || 8788);
+const basePort = Number(process.env.WORKSPACE_PORT || 8788);
+let port = basePort;
 const bind = process.env.WORKSPACE_BIND || '127.0.0.1';
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
+if (!Number.isInteger(basePort) || basePort < 1 || basePort > 65535) {
   console.error(`[workspace] invalid port: ${process.env.WORKSPACE_PORT}`);
   process.exit(1);
 }
+// workspace.sh pre-flights the port itself and records the one it got, so it passes
+// WORKSPACE_PORT_STRICT=1 and keeps sole ownership of the walk. Bare launchers
+// (workspace.ps1, workspace.cmd, `node serve-node.mjs`) have no such pre-flight, so move
+// up the same 20-port window instead of dying on a busy port.
+const PORT_SPAN = 20;
+const lastPort = String(process.env.WORKSPACE_PORT_STRICT || '').trim() === '1' ? basePort : Math.min(basePort + PORT_SPAN, 65535);
 if (!isLoopbackBind(bind)) {
   if (String(process.env.WORKSPACE_ALLOW_LAN || '').trim() !== '1') {
     console.error(`[workspace] refusing to bind ${bind}: every host that can reach this address would read this project's agent activity with no login. Re-run with WORKSPACE_ALLOW_LAN=1 to accept that, or bind 127.0.0.1.`);
@@ -322,37 +329,53 @@ if (!isLoopbackBind(bind)) {
     process.exit(1);
   }
 }
-const server = http.createServer((req, res) => {
+let server;
+let heartbeat = null;
+function onListening() {
+  console.log(`opencode-workspace on http://${bind}:${port}/workspace`);
+  if (!isLoopbackBind(bind)) console.log(`[workspace] listening on ${bind} — reachable from the network, access token required`);
+  console.log('Listening...');
+  // Registered here, not right after listen(): a busy first port only surfaces in the
+  // error handler, so this is the first moment the final port is known.
+  try {
+    touchRegistry(port, loadConfig(RUNTIME, PROJECT).title);
+    heartbeat = setInterval(() => {
+      try {
+        touchRegistry(port, loadConfig(RUNTIME, PROJECT).title);
+      } catch {
+      }
+    }, 5 * 60 * 1000);
+    if (heartbeat.unref) heartbeat.unref();
+  } catch {
+  }
+}
+function onError(e) {
+  if (e.code === 'EADDRINUSE' && port < lastPort) {
+    console.error(`[workspace] port ${port} already in use — trying ${port + 1}`);
+    port += 1;
+    // A fresh server per attempt: the one that failed to listen is not reusable.
+    server = http.createServer(onRequest);
+    server.on('error', onError);
+    server.listen(port, bind, onListening);
+    return;
+  }
+  console.error(`[workspace] server failed: ${e.code === 'EADDRINUSE' ? `port ${port} already in use` : e.message}`);
+  process.exit(e.code === 'EADDRINUSE' ? 3 : 1);
+}
+function onRequest(req, res) {
   handle(req, res).catch((e) => {
     console.error(`[workspace] ${req.method} ${req.url}: ${e && e.stack ? e.stack : e}`);
     if (!res.headersSent) send(res, 500, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Server error');
     else res.end();
   });
-});
-server.on('error', (e) => {
-  console.error(`[workspace] server failed: ${e.code === 'EADDRINUSE' ? `port ${port} already in use` : e.message}`);
-  process.exit(e.code === 'EADDRINUSE' ? 3 : 1);
-});
-server.listen(port, bind, () => {
-  console.log(`opencode-workspace on http://${bind}:${port}/workspace`);
-  if (!isLoopbackBind(bind)) console.log(`[workspace] listening on ${bind} — reachable from the network, access token required`);
-  console.log('Listening...');
-});
-try {
-  touchRegistry(port, loadConfig(RUNTIME, PROJECT).title);
-  const t = setInterval(() => {
-    try {
-      touchRegistry(port, loadConfig(RUNTIME, PROJECT).title);
-    } catch {
-    }
-  }, 5 * 60 * 1000);
-  if (t.unref) t.unref();
-} catch {
 }
+server = http.createServer(onRequest);
+server.on('error', onError);
+server.listen(port, bind, onListening);
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     server.close(() => process.exit(0));
-    server.closeAllConnections?.(); 
+    server.closeAllConnections?.();
     setTimeout(() => process.exit(0), 800).unref();
   });
 }
