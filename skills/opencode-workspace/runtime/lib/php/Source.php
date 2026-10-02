@@ -279,24 +279,44 @@ final class WSource
             }
         }
         $want = WOClient::normDir($projectDir);
-        $proj = null;
+        // the service can hold several project rows with the same canonical path (re-init, re-clone,
+        // moved checkout), and none of them is authoritative: `time.active` gets touched on any row,
+        // so ranking by it picks the wrong one and silently hides every session of the newest row.
+        // union the sessions of all matching rows instead, deduped by session id.
+        $matches = [];
         foreach (is_array($projects) ? $projects : [] as $x) {
             if (self::isObj($x) && WOClient::normDir((string) ($x['canonical'] ?? '')) === $want) {
-                $proj = $x;
-                break;
+                $matches[] = $x;
             }
         }
-        if ($proj === null || !isset($proj['id'])) {
+        if ($matches === []) {
             return $empty;
         }
+        $parts = [];
         try {
-            $listed = WOClient::apiGet($svc, '/api/session?project=' . rawurlencode((string) $proj['id']) . '&limit=' . self::SESS_CAP . '&order=desc');
+            foreach ($matches as $row) {
+                if (!isset($row['id'])) {
+                    continue;
+                }
+                $parts[] = WOClient::apiGet($svc, '/api/session?project=' . rawurlencode((string) $row['id']) . '&limit=' . self::SESS_CAP . '&order=desc');
+            }
             $active = WOClient::apiGet($svc, '/api/session/active');
         } catch (Throwable) {
             WOClient::resetService();
             return $empty;
         }
-        $sessions = (self::isObj($listed) && isset($listed['data']) && is_array($listed['data'])) ? array_values(array_filter($listed['data'], self::isObj(...))) : [];
+        $merged = [];
+        foreach ($parts as $p) {
+            if (!self::isObj($p) || !isset($p['data']) || !is_array($p['data'])) {
+                continue;
+            }
+            foreach ($p['data'] as $x) {
+                if (self::isObj($x) && isset($x['id']) && is_string($x['id']) && $x['id'] !== '') {
+                    $merged[$x['id']] = $x;
+                }
+            }
+        }
+        $sessions = array_values($merged);
         $running = [];
         if (self::isObj($active) && isset($active['data']) && self::isObj($active['data'])) {
             foreach ($active['data'] as $k => $_) {

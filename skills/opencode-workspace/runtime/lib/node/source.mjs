@@ -204,18 +204,27 @@ export async function scanSource({ projectDir, storageDir, cfg, nowSec }) {
     }
   }
   const want = normDir(projectDir);
-  const proj = (Array.isArray(projects) ? projects : []).find((x) => isPlainObj(x) && normDir(x.canonical || '') === want);
-  if (!proj) return empty;
-  let listed;
+  // the service can hold several project rows with the same canonical path (re-init, re-clone, moved
+  // checkout), and none of them is authoritative: `time.active` gets touched on any row, so ranking
+  // by it picks the wrong one and silently hides every session of the newest row. union the
+  // sessions of all matching rows instead, deduped by session id.
+  const rows = (Array.isArray(projects) ? projects : []).filter((x) => isPlainObj(x) && normDir(x.canonical || '') === want);
+  if (!rows.length) return empty;
+  let parts = [];
   let active;
   try {
-    listed = await get(`/api/session?project=${encodeURIComponent(proj.id)}&limit=${SESS_CAP}&order=desc`);
+    for (const row of rows) {
+      if (!row.id) continue;
+      parts.push(await get(`/api/session?project=${encodeURIComponent(row.id)}&limit=${SESS_CAP}&order=desc`));
+    }
     active = await get('/api/session/active');
   } catch {
     resetService();
     return empty;
   }
-  const sessions = Array.isArray(listed?.data) ? listed.data : [];
+  const merged = new Map();
+  for (const p of parts) for (const x of (Array.isArray(p?.data) ? p.data : [])) if (isPlainObj(x) && x.id) merged.set(x.id, x);
+  const sessions = [...merged.values()];
   const running = new Set(isPlainObj(active?.data) ? Object.keys(active.data) : []);
   const cutoff = (nowSec - cfg.window_days * 86400) * 1000;
   const inWin = sessions.filter((x) => isPlainObj(x) && num(x.time?.created) >= cutoff);
