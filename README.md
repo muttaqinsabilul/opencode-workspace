@@ -163,4 +163,4 @@ Never include session contents or real project data in examples or screenshots.
 
 ## License
 
-[MIT](LICENSE) © sabiluldev-bit. No third-party libraries — the browser client is plain Canvas 2D.
+[MIT](LICENSE) © muttaqinsabilul. No third-party libraries — the browser client is plain Canvas 2D.
