@@ -33,25 +33,25 @@ git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 
 ### 2. Run setup from inside your project
 
-Open a terminal **in the project you want to watch** (example: `D:\projek\cake-shop`), then pick **one** command below. Never run both.
+Open a terminal **in the project you want to watch** (example: `D:\path\to\your-project`), then pick **one** command below. Never run both.
 
 **A. Windows PowerShell (easiest on Windows, no bash needed):**
 
 ```powershell
-cd D:\projek\cake-shop
+cd D:\path\to\your-project
 powershell -File D:\tools\opencode-workspace\setup.ps1
 ```
 
-Replace `D:\projek\cake-shop` with your project folder, and `D:\tools\opencode-workspace` with where you cloned in step 1.
+Replace `D:\path\to\your-project` with your project folder, and `D:\tools\opencode-workspace` with where you cloned in step 1.
 
 **B. bash (macOS / Linux / Git Bash / WSL):**
 
 ```bash
-cd ~/projects/cake-shop
+cd ~/path/to/your-project
 bash ~/tools/opencode-workspace/setup.sh
 ```
 
-Replace `~/projects/cake-shop` with your project folder, and `~/tools/opencode-workspace` with where you cloned in step 1.
+Replace `~/path/to/your-project` with your project folder, and `~/tools/opencode-workspace` with where you cloned in step 1.
 
 No terminal at hand? Paste this into any OpenCode chat (replace the path with yours):
 
@@ -65,7 +65,7 @@ read its README Quick start, link the skill, then run workspace.
 Success looks like this:
 
 ```
-Project : D:\projek\cake-shop
+Project : D:\path\to\your-project
 Runtime : node v22.1.0
 Skill   : linked C:\Users\you\.config\opencode\skills\opencode-workspace
 URL     : http://127.0.0.1:8788/workspace
@@ -105,7 +105,7 @@ To link the skill by hand on a machine where setup never ran, see [SKILL.md](ski
 Advanced — normally you just ask OpenCode `run workspace`. If you run it by hand, run from your project folder. `workspace.sh` lives inside the clone:
 
 ```bash
-cd ~/projects/cake-shop
+cd ~/path/to/your-project
 bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start                    # safe to repeat: prints URL if already running
 bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start --php              # force PHP (--node forces Node)
 bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start --port 9000        # start searching from port 9000
@@ -180,7 +180,7 @@ Optional. Create `.opencode/opencode-workspace.json` in the project you are watc
 
 ```json
 {
-  "title": "Cake Shop",
+  "title": "Your Project",
   "port": 8790,
   "names": {
     "lead": "Jack",
