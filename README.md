@@ -21,17 +21,19 @@ No npm or Composer dependencies at runtime. The browser client is plain Canvas 2
 
 ## Quick start
 
-Easiest first run — one command detects the toolchain, installs the skill, and starts the server.
-Run it from the **project you want to watch** (sessions are looked up for the current directory),
-not from the cloned repo.
+Easiest first run — **pick ONE** command for your shell. Both do the same thing: detect the
+toolchain, install the skill, and start the server. Run it from the **project you want to watch**
+(sessions are looked up for the current directory), not from the cloned repo.
 
 ```bash
+# bash: macOS / Linux / Windows via Git Bash or WSL
 git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 cd <your-project>
 bash <path-to>/opencode-workspace/setup.sh
 ```
 
 ```powershell
+# PowerShell: native Windows, no bash needed (either block, never both)
 git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 cd <your-project>
 powershell -File <path-to>\opencode-workspace\setup.ps1
