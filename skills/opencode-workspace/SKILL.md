@@ -14,6 +14,12 @@ finds the service automatically; override via env `WORKSPACE_OPENCODE_URL`, `WOR
 
 User args: $ARGUMENTS
 
+## First-time install (only when the user points you at a clone and the skill is not linked yet)
+1. Link this folder into the skills dir (absolute path, idempotent — skip if already correct):
+   `mkdir -p ~/.config/opencode/skills && ln -s <clone>/skills/opencode-workspace ~/.config/opencode/skills/opencode-workspace`
+   (Windows: `New-Item -ItemType SymbolicLink …` elevated, else copy the folder).
+2. Continue with Steps below. From now on the user just says "run workspace".
+
 ## Steps
 1. **Pick the command from the args** (no args = `start`):
    - `start` / empty → `bash "<skill-dir>/runtime/bin/workspace.sh" start` (pass `--node`, `--php`, `--port N` through when given).

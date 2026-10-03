@@ -21,13 +21,37 @@ No npm or Composer dependencies at runtime. The browser client is plain Canvas 2
 
 ## Quick start
 
-Run the launcher from the **project you want to watch** (sessions are looked up for the current directory),
+Easiest first run — one command detects the toolchain, installs the skill, and starts the server.
+Run it from the **project you want to watch** (sessions are looked up for the current directory),
 not from the cloned repo.
-
-macOS / Linux:
 
 ```bash
 git clone https://github.com/muttaqinsabilul/opencode-workspace.git
+cd <your-project>
+bash <path-to>/opencode-workspace/setup.sh
+```
+
+```powershell
+git clone https://github.com/muttaqinsabilul/opencode-workspace.git
+cd <your-project>
+powershell -File <path-to>\opencode-workspace\setup.ps1
+```
+
+No terminal at hand? Paste this to any OpenCode agent session instead (replace the path with yours):
+
+```
+Set up opencode-workspace from C:\path\to\opencode-workspace for this project:
+read its README Quick start, link the skill, then run workspace.
+```
+
+After setup, every later session is just: ask OpenCode to "run workspace". To manage the server
+yourself, use the launchers directly:
+
+> No symlink privilege (common on Windows without Developer Mode / elevation)? Setup stops with
+> instructions — just re-run with the copy fallback: `bash setup.sh --copy` or `setup.ps1 -Copy`.
+> A copy goes stale after `git pull`; re-run the same command to refresh it.
+
+```bash
 cd <your-project>
 bash <path-to>/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start
 ```
@@ -35,7 +59,6 @@ bash <path-to>/opencode-workspace/skills/opencode-workspace/runtime/bin/workspac
 Windows (native, no bash needed — run from your project directory):
 
 ```powershell
-git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 cd <your-project>
 <path-to>\opencode-workspace\workspace.ps1
 ```
@@ -54,12 +77,11 @@ Opencode Workspace running (node) for project: cake-shop
 ```
 
 Open the URL. Starting is idempotent — if a server already runs for that project it just prints the URL,
-and a busy port moves to the next free one automatically.
-
-To load it as an OpenCode skill:
+and a busy port moves to the next free one automatically. `setup.sh` / `setup.ps1` already linked the
+skill; the manual commands below are only for linking it yourself on a machine where setup never ran:
 
 ```bash
-# macOS / Linux — use the absolute path, then verify
+# macOS / Linux — use the absolute path
 mkdir -p ~/.config/opencode/skills
 ln -s /absolute/path/to/opencode-workspace/skills/opencode-workspace ~/.config/opencode/skills/opencode-workspace
 ```
