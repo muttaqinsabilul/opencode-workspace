@@ -21,100 +21,97 @@ No npm or Composer dependencies at runtime. The browser client is plain Canvas 2
 
 ## Quick start
 
-Clone once, then **pick ONE** setup command for your shell. Both detect the toolchain, install the
-skill, and start the server — with two honest differences: `setup.ps1` needs Node 18+ (no PHP fallback)
-and forwards `-Port`/`-Bind` only, while `setup.sh` also takes `--node`/`--php`/`--project`/`--quiet`.
-Run it from the **project you want to watch** (sessions are looked up for the current directory),
-not from anywhere inside the cloned repo.
+2 steps, ~2 minutes. Clone once, then set up once per project.
+
+### 1. Clone this repo once
+
+Put it **outside** your project. Example: `D:\tools\opencode-workspace` on Windows, `~/tools/opencode-workspace` on macOS/Linux.
 
 ```bash
 git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 ```
 
-```bash
-# bash: macOS / Linux / Windows via Git Bash or WSL
-cd <your-project>
-bash <path-to>/opencode-workspace/setup.sh
-```
+### 2. Run setup from inside your project
+
+Open a terminal **in the project you want to watch** (example: `D:\projek\cake-shop`), then pick **one** command below. Never run both.
+
+**A. Windows PowerShell (easiest on Windows, no bash needed):**
 
 ```powershell
-# PowerShell: native Windows, no bash needed (either block, never both)
-cd <your-project>
-powershell -File <path-to>\opencode-workspace\setup.ps1
+cd D:\projek\cake-shop
+powershell -File D:\tools\opencode-workspace\setup.ps1
 ```
 
-No terminal at hand? Paste this to any OpenCode agent session instead (replace the path with yours):
+Replace `D:\projek\cake-shop` with your project folder, and `D:\tools\opencode-workspace` with where you cloned in step 1.
+
+**B. bash (macOS / Linux / Git Bash / WSL):**
+
+```bash
+cd ~/projects/cake-shop
+bash ~/tools/opencode-workspace/setup.sh
+```
+
+Replace `~/projects/cake-shop` with your project folder, and `~/tools/opencode-workspace` with where you cloned in step 1.
+
+No terminal at hand? Paste this into any OpenCode chat (replace the path with yours):
 
 ```
-Set up opencode-workspace from C:\path\to\opencode-workspace for this project:
+Set up opencode-workspace from D:\tools\opencode-workspace for this project:
 read its README Quick start, link the skill, then run workspace.
 ```
 
-After setup, every later session is just: ask OpenCode to "run workspace". To manage the server
-yourself, use the launchers directly:
+### 3. Open the URL
 
-> No symlink privilege (common on Windows without Developer Mode / elevation)? Setup stops with
-> instructions — just re-run with the copy fallback: `bash setup.sh --copy` or `setup.ps1 -Copy`.
-> A copy goes stale after `git pull`; re-run the same command to refresh it.
-
-```bash
-cd <your-project>
-bash <path-to>/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start
-```
-
-Windows (native, no bash needed — run from your project directory):
-
-```powershell
-cd <your-project>
-<path-to>\opencode-workspace\workspace.ps1
-```
-
-```cmd
-cd <your-project>
-set WORKSPACE_PROJECT=<your-project> && <path-to>\opencode-workspace\workspace.cmd
-```
-
-Expected output (`setup.sh`; `setup.ps1` prints the same `Project:`/`Skill:`/`URL:` lines):
+Success looks like this:
 
 ```
-Project : C:\projects\cake-shop
+Project : D:\projek\cake-shop
 Runtime : node v22.1.0
 Skill   : linked C:\Users\you\.config\opencode\skills\opencode-workspace
-Opencode Workspace running (node) for project: cake-shop
-  URL      : http://127.0.0.1:8788/workspace
-  Stop     : bash "…/runtime/bin/workspace.sh" stop
+URL     : http://127.0.0.1:8788/workspace
 From now on, just ask OpenCode: run workspace
 ```
 
-Open the URL. Starting via `workspace.sh` is idempotent — if a server already runs for that project it
-just prints the URL, and a busy base port walks `base…base+20` to the next free one automatically.
-(`workspace.ps1` / `workspace.cmd` are foreground launchers with no reuse/`stop`: one run, one server.) `setup.sh` / `setup.ps1` already linked the
-skill; the manual commands below are only for linking it yourself on a machine where setup never ran:
+Open the `URL` line in your browser. Done.
+
+Next time, no command needed — just ask OpenCode: `run workspace`.
+
+> Setup fails with a symlink error (common on Windows without Developer Mode)? Re-run the same command with the copy option: add `-Copy` for PowerShell, or `--copy` for bash. After `git pull`, re-run it once to refresh the copy.
+
+<details>
+<summary>Start / stop the server manually (optional)</summary>
+
+Setup already did this for you. Only use this if you want to control the server yourself.
 
 ```bash
-# macOS / Linux — use the absolute path
-mkdir -p ~/.config/opencode/skills
-ln -s /absolute/path/to/opencode-workspace/skills/opencode-workspace ~/.config/opencode/skills/opencode-workspace
+# bash, run from your project folder
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh stop
 ```
 
 ```powershell
-# Windows (elevated prompt for the symlink; otherwise copy the folder instead)
-New-Item -ItemType Directory -Force -Path $env:USERPROFILE\.config\opencode\skills
-New-Item -ItemType SymbolicLink -Path $env:USERPROFILE\.config\opencode\skills\opencode-workspace -Target C:\absolute\path\to\opencode-workspace\skills\opencode-workspace
+# PowerShell, run from your project folder (stops with Ctrl+C)
+D:\tools\opencode-workspace\workspace.ps1
 ```
 
-Then ask OpenCode to "run workspace".
+If the port is busy, setup picks the next free one automatically — open the URL it prints.
+
+To link the skill by hand on a machine where setup never ran, see [SKILL.md](skills/opencode-workspace/SKILL.md).
+
+</details>
 
 ## Commands
 
+Advanced — normally you just ask OpenCode `run workspace`. If you run it by hand, run from your project folder. `workspace.sh` lives inside the clone:
+
 ```bash
-cd <your-project>
-bash workspace.sh start                    # idempotent: prints URL if already running
-bash workspace.sh start --php              # force the PHP runtime (--node forces Node)
-bash workspace.sh start --port 9000        # start searching from a specific port
-bash workspace.sh start --project DIR --bind ADDR --quiet
-bash workspace.sh stop | restart | status | url | detect
-bash workspace.sh help
+cd ~/projects/cake-shop
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start                    # safe to repeat: prints URL if already running
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start --php              # force PHP (--node forces Node)
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh start --port 9000        # start searching from port 9000
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh stop
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh status
+bash ~/tools/opencode-workspace/skills/opencode-workspace/runtime/bin/workspace.sh help
 ```
 
 | Command | What it does |
