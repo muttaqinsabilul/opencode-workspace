@@ -20,3 +20,7 @@ Thumbs.db
 # runtime state (never in repo — lives in ~/.cache/opencode-workspace/)
 *.pid
 server.env
+server.log
+lan-token.txt
+registry.json
+registry.json.tmp-*

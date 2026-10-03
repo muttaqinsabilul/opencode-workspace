@@ -1,7 +1,7 @@
 ---
 name: opencode-workspace
 description: Zero-config 2D workspace floor plan (Canvas 2D) at http://127.0.0.1:8788/workspace showing what OpenCode is doing in this project. The Lead (main session) works at their desk; 4 team members (Alex, Mia, Leo, Emma) hang out in the relaxing rooms (musolla, nonton TV, ping pong, warung kopi, garasi bakso), then sit down to work every time OpenCode calls a subagent; when the team is full, freelancers come through the door. All from the local OpenCode service API, read-only, no files written to the project. Node ≥ 18 (or PHP ≥ 8.1). Use when the user wants to view/start/stop the workspace or the subagent dashboard.
-argument-hint: "[start|stop|status|public|stop-public] [--node|--php] [--port N]"
+argument-hint: "[start|stop|restart|status|url|detect] [--node|--php] [--port N] [--project DIR] [--bind ADDR]"
 ---
 
 The ready-to-run runtime lives in this skill directory (`runtime/`) — **nothing is copied into the project**. All commands use
@@ -18,6 +18,7 @@ User args: $ARGUMENTS
 1. **Pick the command from the args** (no args = `start`):
    - `start` / empty → `bash "<skill-dir>/runtime/bin/workspace.sh" start` (pass `--node`, `--php`, `--port N` through when given).
    - `stop` → `… workspace.sh stop` · `status` → `… workspace.sh status` · `restart` → `… workspace.sh restart`.
+   - `url` → prints the URL only · `detect` → environment check (Node/PHP/curl/opencode/service).
 2. The script is idempotent: if a server already runs for this project it just prints the URL; busy port → automatically
    moves to the next free port; Node ≥ 18 is used when available, otherwise PHP ≥ 8.1. If neither exists, relay
    the script's error message verbatim (how to install Node/PHP), then stop.
