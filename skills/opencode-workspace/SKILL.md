@@ -15,9 +15,10 @@ finds the service automatically; override via env `WORKSPACE_OPENCODE_URL`, `WOR
 User args: $ARGUMENTS
 
 ## First-time install (only when the user points you at a clone and the skill is not linked yet)
-1. Link this folder into the skills dir (absolute path, idempotent — skip if already correct):
+1. Fastest: run `<clone>/setup.sh --project <their-project>` (bash; detects toolchain, links this skill,
+   starts the server). POSIX only — on native Windows without bash, link manually:
    `mkdir -p ~/.config/opencode/skills && ln -s <clone>/skills/opencode-workspace ~/.config/opencode/skills/opencode-workspace`
-   (Windows: `New-Item -ItemType SymbolicLink …` elevated, else copy the folder).
+   (Windows: `New-Item -ItemType SymbolicLink …` elevated, else copy the folder and re-copy after updates).
 2. Continue with Steps below. From now on the user just says "run workspace".
 
 ## Steps

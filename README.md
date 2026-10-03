@@ -21,20 +21,24 @@ No npm or Composer dependencies at runtime. The browser client is plain Canvas 2
 
 ## Quick start
 
-Easiest first run — **pick ONE** command for your shell. Both do the same thing: detect the
-toolchain, install the skill, and start the server. Run it from the **project you want to watch**
-(sessions are looked up for the current directory), not from the cloned repo.
+Clone once, then **pick ONE** setup command for your shell. Both detect the toolchain, install the
+skill, and start the server — with two honest differences: `setup.ps1` needs Node 18+ (no PHP fallback)
+and forwards `-Port`/`-Bind` only, while `setup.sh` also takes `--node`/`--php`/`--project`/`--quiet`.
+Run it from the **project you want to watch** (sessions are looked up for the current directory),
+not from anywhere inside the cloned repo.
+
+```bash
+git clone https://github.com/muttaqinsabilul/opencode-workspace.git
+```
 
 ```bash
 # bash: macOS / Linux / Windows via Git Bash or WSL
-git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 cd <your-project>
 bash <path-to>/opencode-workspace/setup.sh
 ```
 
 ```powershell
 # PowerShell: native Windows, no bash needed (either block, never both)
-git clone https://github.com/muttaqinsabilul/opencode-workspace.git
 cd <your-project>
 powershell -File <path-to>\opencode-workspace\setup.ps1
 ```
@@ -70,16 +74,21 @@ cd <your-project>
 set WORKSPACE_PROJECT=<your-project> && <path-to>\opencode-workspace\workspace.cmd
 ```
 
-Expected output:
+Expected output (`setup.sh`; `setup.ps1` prints the same `Project:`/`Skill:`/`URL:` lines):
 
 ```
+Project : C:\projects\cake-shop
+Runtime : node v22.1.0
+Skill   : linked C:\Users\you\.config\opencode\skills\opencode-workspace
 Opencode Workspace running (node) for project: cake-shop
   URL      : http://127.0.0.1:8788/workspace
   Stop     : bash "…/runtime/bin/workspace.sh" stop
+From now on, just ask OpenCode: run workspace
 ```
 
-Open the URL. Starting is idempotent — if a server already runs for that project it just prints the URL,
-and a busy port moves to the next free one automatically. `setup.sh` / `setup.ps1` already linked the
+Open the URL. Starting via `workspace.sh` is idempotent — if a server already runs for that project it
+just prints the URL, and a busy base port walks `base…base+20` to the next free one automatically.
+(`workspace.ps1` / `workspace.cmd` are foreground launchers with no reuse/`stop`: one run, one server.) `setup.sh` / `setup.ps1` already linked the
 skill; the manual commands below are only for linking it yourself on a machine where setup never ran:
 
 ```bash
